@@ -1,4 +1,5 @@
 const cookieVal = '';
+
 const header = {
 	Accept: 'application/json, text/plain, */*',
 	'Content-Type': 'application/json;charset=UTF-8',
@@ -6,14 +7,15 @@ const header = {
 	Cookie: cookieVal,
 }
 function checkin(){
-	const url = {
+	const params = {
 		url: 'https://glados.one/api/user/checkin',
 		headers: {...header},
-	}
-	$httpClient.post(url, (error,response,data)=> {
-		console.log(error,response,data);
-		$notification.post('test','',response)
-		$done()
-	})
+		body: JSON.stringfy({"token":"glados.one"})
+	};
+	console.log(params);
+	$httpClient.post(params, function(error,response,data){
+		console.log(error,response, data);
+		$done();
+	});
 }
 checkin()
