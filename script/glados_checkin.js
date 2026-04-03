@@ -10,7 +10,7 @@ function checkin(){
 	const params = {
 		url: 'https://glados.one/api/user/checkin',
 		headers: {...header},
-		body: JSON.stringfy({"token":"glados.one"})
+		body: JSON.stringify({"token":"glados.one"})
 	};
 	console.log(params);
 	$httpClient.post(params, function(error,response,data){
