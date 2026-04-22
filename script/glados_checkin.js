@@ -35,9 +35,9 @@ function checkin(){
 				return;
 			}
 			if(json.code === 0){
-				$notification.post('GlaDOS签到结果', '当前积分总计:' + formatAmount(json.list?.[0]?.balance), json.message);
+				$notification.post('GlaDOS签到成功', '当前积分总计:' + formatAmount(json.list?.[0]?.balance), json.message);
 			}else {
-				$notification.post('GlaDos签到结果', '当前积分总计:' + formatAmount(json.list?.[0]?.balance), json.message, );
+				$notification.post('GlaDos签到失败', '当前积分总计:' + formatAmount(json.list?.[0]?.balance), json.message, );
 			}
 		}
 		$done();
