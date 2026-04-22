@@ -1,4 +1,15 @@
-# Loon-Set
+## GitHub Raw 路径说明
 
-资源文件baseurl:https://raw.githubusercontent.com/vibedirty/Loon-Set/refs/heads/main
-后面可以拼接文件夹+文件名称，例如：https://raw.githubusercontent.com/vibedirty/Loon-Set/refs/heads/main/script/glados_checkin.js
+Loon 订阅远程脚本或插件时，GitHub 文件建议使用 `raw.githubusercontent.com` 地址。
+
+正确格式：
+
+```text
+https://raw.githubusercontent.com/<用户名>/<仓库名>/main/<文件路径>
+```
+
+例如本仓库的签到脚本合集：
+
+```text
+https://raw.githubusercontent.com/vibedirty/Loon-Set/main/script/signin.js
+```

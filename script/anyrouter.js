@@ -53,7 +53,7 @@ function signIn() {
 
     let json;
     try {
-      json = data ? JSON.parse(data) : null;
+      json = JSON.parse(data);
     } catch (e) {
       notify("AnyRouter 返回解析失败", `HTTP ${response?.status || "未知"}`, String(e));
       $done();
