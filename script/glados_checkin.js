@@ -1,4 +1,4 @@
-const cookieVal = '';
+const cookieVal = $persistentStore.read("glados-cookie") || "";
 
 const header = {
 	Accept: 'application/json, text/plain, */*',
@@ -30,7 +30,7 @@ function checkin(){
 			try{
 				json = JSON.parse(data);
 			}catch(e){
-				$notification.post('GlaDOS返回解析失败', '', String(e));
+				$notification.post('GlaDOS数据解析失败', '', String(e));
 				$done();
 				return;
 			}
