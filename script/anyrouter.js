@@ -247,7 +247,7 @@ function signIn(dynamicCookie) {
         typeof message === "string" && message.trim()
           ? message.trim()
           : "今天已经签到过了";
-      finishWithBalance(dynamicCookie, "AnyRouter签到结果", text);
+      finishWithBalance(dynamicCookie, "AnyRouter签到成功", text);
       return;
     }
 
