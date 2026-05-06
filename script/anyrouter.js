@@ -186,16 +186,16 @@ function finishWithBalance(dynamicCookie, title, message) {
   fetchAccountBalance(dynamicCookie, function (error, balance) {
     if (error) {
       console.log(`anyrouter balance fetch failed: ${String(error)}`);
-      finish(title, "获取账户余额失败", message);
+      finish(title, message, "获取账户余额失败");
       return;
     }
 
     $persistentStore.write(balance, balanceKey);
-    const subtitle = previousBalance
+    const balanceText = previousBalance
       ? `当前账户余额：$${balance}，上次余额：$${previousBalance}`
       : `当前账户余额：$${balance}`;
 
-    finish(title, subtitle, message);
+    finish(title, message, balanceText);
   });
 }
 
