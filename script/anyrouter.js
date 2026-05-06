@@ -1,5 +1,6 @@
 const sessionCookie = String($persistentStore.read("any-cookie") || "").trim();
 const userId = $persistentStore.read("any-user") || "";
+const balanceKey = "any-balance";
 
 const UPSTREAM = "https://anyrouter.top";
 const USER_AGENT =
@@ -174,20 +175,27 @@ function fetchAccountBalance(dynamicCookie, callback) {
       }
 
       const balance = quota / 500000;
-      callback(null, `账户余额：$${balance.toFixed(2)}`);
+      callback(null, balance.toFixed(2));
     }
   );
 }
 
 function finishWithBalance(dynamicCookie, title, message) {
-  fetchAccountBalance(dynamicCookie, function (error, balanceText) {
+  const previousBalance = String($persistentStore.read(balanceKey) || "").trim();
+
+  fetchAccountBalance(dynamicCookie, function (error, balance) {
     if (error) {
       console.log(`anyrouter balance fetch failed: ${String(error)}`);
       finish(title, "获取账户余额失败", message);
       return;
     }
 
-    finish(title, balanceText, message);
+    $persistentStore.write(balance, balanceKey);
+    const subtitle = previousBalance
+      ? `当前账户余额：$${balance}，上次余额：$${previousBalance}`
+      : `当前账户余额：$${balance}`;
+
+    finish(title, subtitle, message);
   });
 }
 
