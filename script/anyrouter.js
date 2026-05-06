@@ -43,6 +43,10 @@ function extractMessage(json, fallback) {
   );
 }
 
+function buildSignedCookie(dynamicCookie) {
+  return `${dynamicCookie}; ${sessionCookie}`;
+}
+
 function computeAcwCookie(arg1) {
   const unsboxed = UNSBOX_TABLE.map((index) => arg1[index - 1]).join("");
   let value = "";
@@ -107,8 +111,87 @@ function getDynamicCookie(callback) {
   });
 }
 
-function signIn(dynamicCookie) {
+function parseQuota(json) {
+  const rawQuota = json?.quota ?? json?.data?.quota;
+  if (rawQuota == null) {
+    return null;
+  }
 
+  const quota =
+    typeof rawQuota === "string"
+      ? Number(rawQuota.replace(/,/g, ""))
+      : Number(rawQuota);
+
+  if (!Number.isFinite(quota)) {
+    return null;
+  }
+
+  return quota;
+}
+
+function fetchAccountBalance(dynamicCookie, callback) {
+  $httpClient.get(
+    {
+      url: `${UPSTREAM}/api/user/self`,
+      headers: {
+        Host: "anyrouter.top",
+        Connection: "keep-alive",
+        "New-API-User": userId,
+        "Cache-Control": "no-store",
+        "User-Agent": USER_AGENT,
+        Accept: "application/json, text/plain, */*",
+        Origin: UPSTREAM,
+        Referer: `${UPSTREAM}/`,
+        "Accept-Language": "en,zh-CN;q=0.9,zh;q=0.8",
+        Cookie: buildSignedCookie(dynamicCookie),
+      },
+    },
+    function (error, response, data) {
+      if (error) {
+        callback(error);
+        return;
+      }
+
+      console.log(`anyrouter balance self status: ${response?.status || "未知"}`);
+
+      let json;
+      try {
+        json = JSON.parse(data);
+      } catch (e) {
+        const preview = String(data || "").slice(0, 200);
+        callback(
+          new Error(
+            `balance response parse failed, HTTP ${response?.status || "未知"}, body=${preview || "<empty>"}`
+          )
+        );
+        return;
+      }
+
+      const quota = parseQuota(json);
+      if (quota === null) {
+        callback(new Error("quota not found in self response"));
+        return;
+      }
+
+      const balance = quota / 500000;
+      callback(null, `账户余额：$${balance.toFixed(2)}`);
+    }
+  );
+}
+
+function finishWithBalance(dynamicCookie, title, message) {
+  fetchAccountBalance(dynamicCookie, function (error, balanceText) {
+    if (error) {
+      console.log(`anyrouter balance fetch failed: ${String(error)}`);
+      finish(title, "获取账户余额失败", message);
+      return;
+    }
+
+    finish(title, balanceText, message);
+  });
+}
+
+function signIn(dynamicCookie) {
   const params = {
     url: `${UPSTREAM}/api/user/sign_in`,
     headers: {
@@ -121,7 +204,7 @@ function signIn(dynamicCookie) {
       Origin: UPSTREAM,
       Referer: `${UPSTREAM}/`,
       "Accept-Language": "en,zh-CN;q=0.9,zh;q=0.8",
-      Cookie: `${dynamicCookie}; ${sessionCookie}`,
+      Cookie: buildSignedCookie(dynamicCookie),
     },
   };
 
@@ -130,7 +213,7 @@ function signIn(dynamicCookie) {
     console.log(`anyrouter sign in raw body: ${String(data || "")}`);
 
     if (error) {
-      finish("AnyRouter签到错误", "", String(error));
+      finishWithBalance(dynamicCookie, "AnyRouter签到错误", String(error));
       return;
     }
 
@@ -139,7 +222,11 @@ function signIn(dynamicCookie) {
       json = JSON.parse(data);
     } catch (e) {
       const preview = String(data || "").slice(0, 200);
-      finish("AnyRouter返回解析失败", `HTTP ${response?.status || "未知"}`, preview || String(e));
+      finishWithBalance(
+        dynamicCookie,
+        "AnyRouter返回解析失败",
+        `HTTP ${response?.status || "未知"} ${preview || String(e)}`
+      );
       return;
     }
 
@@ -152,15 +239,15 @@ function signIn(dynamicCookie) {
         typeof message === "string" && message.trim()
           ? message.trim()
           : "今天已经签到过了";
-      finish("AnyRouter签到结果", `HTTP ${status}`, text);
+      finishWithBalance(dynamicCookie, "AnyRouter签到结果", text);
       return;
     }
 
-    finish(
+    finishWithBalance(
+      dynamicCookie,
       "AnyRouter签到失败",
-      `HTTP ${status}`,
       typeof message === "string" && message.trim()
-        ? message.trim()
+        ? `HTTP ${status} ${message.trim()}`
         : JSON.stringify(json)
     );
   });
