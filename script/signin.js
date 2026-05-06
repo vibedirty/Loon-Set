@@ -3,3 +3,4 @@
 
 cron "20 9 * * *" script-path=https://raw.githubusercontent.com/vibedirty/Loon-Set/main/script/glados_checkin.js, timeout=60, tag=glados签到, enable=true
 cron "21 9 * * *" script-path=https://raw.githubusercontent.com/vibedirty/Loon-Set/main/script/anyrouter.js, timeout=60, tag=anyrouter签到, enable=true
+cron "22 9 * * *" script-path=https://raw.githubusercontent.com/vibedirty/Loon-Set/main/script/li7store.js, timeout=60, tag=7li7li签到, enable=true
