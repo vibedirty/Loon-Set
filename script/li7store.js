@@ -164,7 +164,7 @@ function signIn() {
     console.log(`7li store raw body: ${String(data || "")}`);
 
     if (error) {
-      finishWithUserPoints("签到错误", String(error), 0);
+      finishWithUserPoints("7li store 签到错误", String(error), 0);
       return;
     }
 
@@ -174,13 +174,13 @@ function signIn() {
       json = extractSignInResult(data);
     } catch (e) {
       const preview = String(data || "").slice(0, 200);
-      finishWithUserPoints("签到错误", preview || String(e), 0);
+      finishWithUserPoints("7li store 签到错误", preview || String(e), 0);
       return;
     }
 
     if (json.success) {
       finishWithUserPoints(
-        "签到成功",
+        "7li store 签到成功",
         formatConsecutiveDays(json.consecutiveDays),
         json.points
       );
@@ -189,7 +189,7 @@ function signIn() {
 
     const errorMessage = String(json.error || json.message || "").trim();
     finishWithUserPoints(
-      "签到失败",
+      "7li store 签到失败",
       errorMessage || JSON.stringify(json),
       json.points || 0
     );
