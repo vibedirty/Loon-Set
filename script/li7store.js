@@ -1,14 +1,14 @@
 const sessionCookie = String($persistentStore.read("li7-cookie") || "").trim();
 
 const UPSTREAM = "https://store.7li7li.com";
-const SIGNIN_ACTION = "00124500bd06645d80040170b0cb111f6ab433acdf";
-const USER_POINTS_ACTION = "003f98ec793da0311ba0670a72548882ef1214b0f0";
+const SIGNIN_ACTION = "001759bc4ec10ab86de9862e3a6a05849b8e4d24fb";
+const USER_POINTS_ACTION = "003d96c662d3d8a8fa772bc1307ff43b29e801d4dc";
 const ROUTER_STATE =
   "%5B%22%22%2C%7B%22children%22%3A%5B%22__PAGE__%22%2C%7B%7D%2Cnull%2Cnull%5D%7D%2Cnull%2Cnull%2Ctrue%5D";
 const USER_AGENT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) " +
   "AppleWebKit/537.36 (KHTML, like Gecko) " +
-  "Chrome/147.0.0.0 Safari/537.36";
+  "Chrome/148.0.0.0 Safari/537.36";
 
 let doneCalled = false;
 
