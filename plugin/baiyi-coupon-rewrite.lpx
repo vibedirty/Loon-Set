@@ -1,0 +1,10 @@
+#!name=百亿补贴券复写
+#!author=Codex
+#!tag=薅羊毛
+#!icon=https://raw.githubusercontent.com/luestr/IconResource/main/App_icon/120px/PinDuoDuo.png
+
+[Rewrite]
+^https:\/\/m\.pinduoduo\.net\/tandy_vase\.html\?.*$ response-body-replace-regex ((?:10:00|16:00|21:00))开抢 $1准备好了吗 "couponType":2 "couponType":0
+
+[MitM]
+hostname=m.pinduoduo.net
