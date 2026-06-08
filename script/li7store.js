@@ -2,8 +2,8 @@ const sessionCookie = String($persistentStore.read("li7-cookie") || "").trim();
 
 const UPSTREAM = "https://store.7li7li.com";
 const DEFAULT_ACTIONS = {
-  checkIn: "00f88461684e29a264c036ff2b6f96b9355e4686dd",
-  getUserPoints: "00f9eec6afcfa0972e38c613b5d80c613caa9e18cb",
+  checkIn: "4077eba853e0b56c5d8abc047340e43496b908092f",
+  getUserPoints: "0018fdf61f514c204617088e7bccf36616433f33de",
 };
 const ROUTER_STATE =
   "%5B%22%22%2C%7B%22children%22%3A%5B%22__PAGE__%22%2C%7B%7D%2Cnull%2Cnull%5D%7D%2Cnull%2Cnull%2Ctrue%5D";
@@ -118,12 +118,73 @@ function parseActionReferences(scriptText) {
   return actions;
 }
 
-function extractPageChunkPath(html) {
-  const match = String(html || "").match(
-    /\/_next\/static\/chunks\/app\/page-[^"'\\]+\.js/
+function extractChunkPaths(html) {
+  const matches = String(html || "").match(
+    /\/_next\/static\/chunks\/(?:app\/)?[^"'\\]+\.js/g
   );
+  const paths = [];
 
-  return match ? match[0] : null;
+  for (const path of matches || []) {
+    if (paths.indexOf(path) === -1) {
+      paths.push(path);
+    }
+  }
+
+  paths.sort(function (a, b) {
+    const aIsAppPage = /\/app\/page-/.test(a);
+    const bIsAppPage = /\/app\/page-/.test(b);
+
+    if (aIsAppPage === bIsAppPage) {
+      return 0;
+    }
+
+    return aIsAppPage ? -1 : 1;
+  });
+
+  return paths;
+}
+
+function scanActionChunks(chunkPaths, index, actions, callback) {
+  if (actions.checkIn && actions.getUserPoints) {
+    callback(null, actions);
+    return;
+  }
+
+  if (index >= chunkPaths.length) {
+    callback(
+      actions.checkIn || actions.getUserPoints
+        ? null
+        : new Error("未从 chunks 提取到 Server Action"),
+      actions
+    );
+    return;
+  }
+
+  $httpClient.get(
+    {
+      url: `${UPSTREAM}${chunkPaths[index]}`,
+      headers: {
+        Host: "store.7li7li.com",
+        "User-Agent": USER_AGENT,
+        Accept: "*/*",
+        Referer: `${UPSTREAM}/`,
+        "Accept-Language": "en,zh-CN;q=0.9,zh;q=0.8",
+        Cookie: sessionCookie,
+      },
+    },
+    function (chunkError, chunkResponse, chunkData) {
+      const found = chunkError ? {} : parseActionReferences(chunkData);
+      scanActionChunks(
+        chunkPaths,
+        index + 1,
+        {
+          checkIn: actions.checkIn || found.checkIn,
+          getUserPoints: actions.getUserPoints || found.getUserPoints,
+        },
+        callback
+      );
+    }
+  );
 }
 
 function fetchCurrentActions(callback) {
@@ -145,39 +206,13 @@ function fetchCurrentActions(callback) {
         return;
       }
 
-      const pageChunkPath = extractPageChunkPath(data);
-      if (!pageChunkPath) {
-        callback(new Error("未找到 app/page chunk"));
+      const chunkPaths = extractChunkPaths(data);
+      if (!chunkPaths.length) {
+        callback(new Error("未找到前端 chunks"));
         return;
       }
 
-      $httpClient.get(
-        {
-          url: `${UPSTREAM}${pageChunkPath}`,
-          headers: {
-            Host: "store.7li7li.com",
-            "User-Agent": USER_AGENT,
-            Accept: "*/*",
-            Referer: `${UPSTREAM}/`,
-            "Accept-Language": "en,zh-CN;q=0.9,zh;q=0.8",
-            Cookie: sessionCookie,
-          },
-        },
-        function (chunkError, chunkResponse, chunkData) {
-          if (chunkError) {
-            callback(chunkError);
-            return;
-          }
-
-          const actions = parseActionReferences(chunkData);
-          if (!actions.checkIn && !actions.getUserPoints) {
-            callback(new Error("未从 app/page chunk 提取到 Server Action"));
-            return;
-          }
-
-          callback(null, actions);
-        }
-      );
+      scanActionChunks(chunkPaths, 0, {}, callback);
     }
   );
 }
