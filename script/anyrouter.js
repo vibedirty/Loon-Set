@@ -358,7 +358,7 @@ function signInAsync(account, dynamicCookie) {
   });
 }
 
-async function runAccount(account) {
+async function runAccount(account, index) {
   console.log(`[${account.name}] start`);
 
   let dynamicCookie = "";
@@ -389,7 +389,10 @@ async function runAccount(account) {
       ? message.trim()
       : "今天已经签到过了";
 
-  const previousBalance = String($persistentStore.read(getBalanceKey(account)) || "").trim();
+  const keyedBalance = String($persistentStore.read(getBalanceKey(account)) || "").trim();
+  const legacyBalance =
+    index === 0 ? String($persistentStore.read("any-balance") || "").trim() : "";
+  const previousBalance = keyedBalance || legacyBalance;
 
   try {
     const balance = await fetchAccountBalanceAsync(account, dynamicCookie);
@@ -429,9 +432,9 @@ async function main() {
 
   const results = [];
 
-  for (const account of accounts) {
+  for (const [index, account] of accounts.entries()) {
     try {
-      results.push(await runAccount(account));
+      results.push(await runAccount(account, index));
     } catch (error) {
       console.log(`[${account.name}] anyrouter run failed: ${String(error)}`);
       results.push({
