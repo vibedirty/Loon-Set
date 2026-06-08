@@ -47,6 +47,22 @@ function normalizeAccount(account, index) {
   };
 }
 
+function parseAccountConfig(raw) {
+  try {
+    return JSON.parse(raw);
+  } catch (jsonError) {
+    const relaxed = String(raw || "")
+      .replace(/("(?:\\.|[^"\\])*"|[-]?\d+(?:\.\d+)?|true|false|null|\]|\})\s+(?=("?[A-Za-z_$][\w$]*"?\s*:))/g, "$1, ")
+      .replace(/([{,]\s*)([A-Za-z_$][\w$]*)\s*:/g, '$1"$2":');
+
+    try {
+      return JSON.parse(relaxed);
+    } catch (relaxedError) {
+      throw jsonError;
+    }
+  }
+}
+
 function readAccounts() {
   const raw = String($persistentStore.read("any-cookie") || "").trim();
   if (!raw) {
@@ -54,7 +70,7 @@ function readAccounts() {
   }
 
   try {
-    const parsed = JSON.parse(raw);
+    const parsed = parseAccountConfig(raw);
     if (Array.isArray(parsed)) {
       return parsed.map(normalizeAccount).filter((item) => item.cookie && item.id);
     }
@@ -64,6 +80,11 @@ function readAccounts() {
       return single.cookie && single.id ? [single] : [];
     }
   } catch (e) {
+    if (/^[\[{]/.test(raw)) {
+      console.log(`anyrouter account config parse failed: ${String(e)}`);
+      return [];
+    }
+
     // 兼容旧格式：any-cookie 仍然是单个 session 值，any-user 仍然单独保存
     const legacyUserId = String($persistentStore.read("any-user") || "").trim();
     if (raw && legacyUserId) {
@@ -95,6 +116,10 @@ function extractMessage(json, fallback) {
   );
 }
 
+function hasDynamicCookie(accountCookie) {
+  return /(?:^|;\s*)acw_sc__v2=/i.test(String(accountCookie || ""));
+}
+
 function removeDynamicCookie(accountCookie) {
   return String(accountCookie || "")
     .split(";")
@@ -104,6 +129,10 @@ function removeDynamicCookie(accountCookie) {
 }
 
 function buildSignedCookie(dynamicCookie, accountCookie) {
+  if (!dynamicCookie && accountCookie) {
+    return String(accountCookie || "").trim();
+  }
+
   const staticCookie = removeDynamicCookie(accountCookie);
 
   return [dynamicCookie, staticCookie].filter(Boolean).join("; ");
@@ -331,8 +360,12 @@ function signInAsync(account, dynamicCookie) {
 async function runAccount(account) {
   console.log(`[${account.name}] start`);
 
-  const dynamicCookie = await getDynamicCookieAsync(account);
-  console.log(`[${account.name}] anyrouter dynamic cookie: ${dynamicCookie}`);
+  const dynamicCookie = hasDynamicCookie(account.cookie)
+    ? ""
+    : await getDynamicCookieAsync(account);
+  if (dynamicCookie) {
+    console.log(`[${account.name}] anyrouter dynamic cookie: ${dynamicCookie}`);
+  }
 
   const signResult = await signInAsync(account, dynamicCookie);
   const status = signResult.status;
