@@ -121,6 +121,12 @@ function extractMessage(json, fallback) {
   );
 }
 
+function isRepeatSignIn(message) {
+  return /已经签到过|今日已签到|重复签到|已签到过了|今天已经签到过了/.test(
+    String(message || "")
+  );
+}
+
 function removeDynamicCookie(accountCookie) {
   return String(accountCookie || "")
     .split(";")
@@ -369,6 +375,11 @@ async function runAccount(account, index) {
     console.log(`[${account.name}] anyrouter dynamic cookie refresh failed: ${String(error)}`);
   }
 
+  const keyedBalance = String($persistentStore.read(getBalanceKey(account)) || "").trim();
+  const legacyBalance =
+    index === 0 ? String($persistentStore.read("any-balance") || "").trim() : "";
+  const previousBalance = keyedBalance || legacyBalance;
+
   const signResult = await signInAsync(account, dynamicCookie);
   const status = signResult.status;
   const message = signResult.message;
@@ -377,6 +388,11 @@ async function runAccount(account, index) {
     return {
       name: account.name,
       ok: false,
+      statusText: `${account.name}签到失败`,
+      balanceText:
+        previousBalance
+          ? `${account.name}余额：获取失败，上次余额：$${previousBalance}`
+          : `${account.name}余额：获取失败，上次余额：无`,
       summary:
         typeof message === "string" && message.trim()
           ? `签到失败 HTTP ${status} ${message.trim()}`
@@ -388,23 +404,21 @@ async function runAccount(account, index) {
     typeof message === "string" && message.trim()
       ? message.trim()
       : "今天已经签到过了";
-
-  const keyedBalance = String($persistentStore.read(getBalanceKey(account)) || "").trim();
-  const legacyBalance =
-    index === 0 ? String($persistentStore.read("any-balance") || "").trim() : "";
-  const previousBalance = keyedBalance || legacyBalance;
+  const repeatSign = isRepeatSignIn(signText);
 
   try {
     const balance = await fetchAccountBalanceAsync(account, dynamicCookie);
     $persistentStore.write(balance, getBalanceKey(account));
 
     const balanceText = previousBalance
-      ? `当前账户余额：$${balance}，上次余额：$${previousBalance}`
-      : `当前账户余额：$${balance}`;
+      ? `${account.name}余额：$${balance}，上次余额：$${previousBalance}`
+      : `${account.name}余额：$${balance}，上次余额：无`;
 
     return {
       name: account.name,
       ok: true,
+      statusText: `${account.name}${repeatSign ? "重复签到" : "签到成功"}`,
+      balanceText,
       summary: `${signText}；${balanceText}`,
     };
   } catch (error) {
@@ -412,15 +426,21 @@ async function runAccount(account, index) {
     return {
       name: account.name,
       ok: true,
+      statusText: `${account.name}${repeatSign ? "重复签到" : "签到成功"}`,
+      balanceText: previousBalance
+        ? `${account.name}余额：获取失败，上次余额：$${previousBalance}`
+        : `${account.name}余额：获取失败，上次余额：无`,
       summary: `${signText}；获取账户余额失败`,
     };
   }
 }
 
-function formatSummary(results) {
-  return results
-    .map((item) => `${item.name}: ${item.summary}`)
-    .join("\n");
+function formatSubtitle(results) {
+  return results.map((item) => item.statusText || `${item.name}签到成功`).join("；");
+}
+
+function formatMessage(results) {
+  return results.map((item) => item.balanceText || `${item.name}余额：未知`).join("\n");
 }
 
 async function main() {
@@ -445,10 +465,7 @@ async function main() {
     }
   }
 
-  const successCount = results.filter((item) => item.ok).length;
-  const subtitle = `${successCount}/${accounts.length} 成功`;
-  const message = formatSummary(results);
-  finish("AnyRouter 签到完成", subtitle, message);
+  finish("AnyRouter 签到完成", formatSubtitle(results), formatMessage(results));
 }
 
 main().catch((error) => {
