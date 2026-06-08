@@ -13,6 +13,11 @@ const UNSBOX_TABLE = [
 let doneCalled = false;
 
 function notify(title, subtitle, message) {
+  console.log(
+    `[notify] title=${JSON.stringify(title || "")} subtitle=${JSON.stringify(
+      subtitle || ""
+    )} message=${JSON.stringify(message || "")}`
+  );
   $notification.post(title, subtitle || "", message || "");
 }
 
@@ -114,10 +119,6 @@ function extractMessage(json, fallback) {
     json?.data?.msg ||
     fallback
   );
-}
-
-function hasDynamicCookie(accountCookie) {
-  return /(?:^|;\s*)acw_sc__v2=/i.test(String(accountCookie || ""));
 }
 
 function removeDynamicCookie(accountCookie) {
@@ -360,11 +361,12 @@ function signInAsync(account, dynamicCookie) {
 async function runAccount(account) {
   console.log(`[${account.name}] start`);
 
-  const dynamicCookie = hasDynamicCookie(account.cookie)
-    ? ""
-    : await getDynamicCookieAsync(account);
-  if (dynamicCookie) {
+  let dynamicCookie = "";
+  try {
+    dynamicCookie = await getDynamicCookieAsync(account);
     console.log(`[${account.name}] anyrouter dynamic cookie: ${dynamicCookie}`);
+  } catch (error) {
+    console.log(`[${account.name}] anyrouter dynamic cookie refresh failed: ${String(error)}`);
   }
 
   const signResult = await signInAsync(account, dynamicCookie);
