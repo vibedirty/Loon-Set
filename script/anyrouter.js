@@ -33,8 +33,12 @@ function finish(title, subtitle, message) {
 function normalizeAccount(account, index) {
   const item = account || {};
   const name = String(item.name || `账号${index + 1}`).trim();
-  const cookie = String(item.cookie || "").trim();
+  let cookie = String(item.cookie || "").trim();
   const id = String(item.id ?? "").trim();
+
+  if (cookie && !/^session=/.test(cookie) && !/[=;]/.test(cookie)) {
+    cookie = `session=${cookie}`;
+  }
 
   return {
     name,
