@@ -1,7 +1,3 @@
-const sessionCookie = String($persistentStore.read("any-cookie") || "").trim();
-const userId = $persistentStore.read("any-user") || "";
-const balanceKey = "any-balance";
-
 const UPSTREAM = "https://anyrouter.top";
 const USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
@@ -34,6 +30,57 @@ function finish(title, subtitle, message) {
   $done();
 }
 
+function normalizeAccount(account, index) {
+  const item = account || {};
+  const name = String(item.name || `账号${index + 1}`).trim();
+  const cookie = String(item.cookie || "").trim();
+  const id = String(item.id ?? "").trim();
+
+  return {
+    name,
+    cookie,
+    id,
+  };
+}
+
+function readAccounts() {
+  const raw = String($persistentStore.read("any-cookie") || "").trim();
+  if (!raw) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      return parsed.map(normalizeAccount).filter((item) => item.cookie && item.id);
+    }
+
+    if (parsed && typeof parsed === "object") {
+      const single = normalizeAccount(parsed, 0);
+      return single.cookie && single.id ? [single] : [];
+    }
+  } catch (e) {
+    // 兼容旧格式：any-cookie 仍然是单个 session 值，any-user 仍然单独保存
+    const legacyUserId = String($persistentStore.read("any-user") || "").trim();
+    if (raw && legacyUserId) {
+      return [
+        {
+          name: "账号1",
+          cookie: raw,
+          id: legacyUserId,
+        },
+      ];
+    }
+  }
+
+  return [];
+}
+
+function getBalanceKey(account) {
+  const suffix = account.id || account.name || "default";
+  return `any-balance-${suffix}`;
+}
+
 function extractMessage(json, fallback) {
   return (
     json?.message ||
@@ -44,8 +91,12 @@ function extractMessage(json, fallback) {
   );
 }
 
-function buildSignedCookie(dynamicCookie) {
-  return `${dynamicCookie}; ${sessionCookie}`;
+function buildSignedCookie(dynamicCookie, accountCookie) {
+  if (!accountCookie) {
+    return dynamicCookie;
+  }
+
+  return `${dynamicCookie}; ${accountCookie}`;
 }
 
 function computeAcwCookie(arg1) {
@@ -61,7 +112,7 @@ function computeAcwCookie(arg1) {
   return `acw_sc__v2=${value}`;
 }
 
-function getArg1(callback) {
+function getArg1(account, callback) {
   $httpClient.get(
     {
       url: `${UPSTREAM}/api/user/self`,
@@ -69,8 +120,8 @@ function getArg1(callback) {
         Host: "anyrouter.top",
         "User-Agent": USER_AGENT,
         Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        Cookie: sessionCookie,
-        "New-API-User": userId,
+        Cookie: account.cookie,
+        "New-API-User": account.id,
       },
     },
     function (error, response, data) {
@@ -99,8 +150,8 @@ function getArg1(callback) {
   );
 }
 
-function getDynamicCookie(callback) {
-  getArg1(function (error, arg1) {
+function getDynamicCookie(account, callback) {
+  getArg1(account, function (error, arg1) {
     if (error) {
       callback(error);
       return;
@@ -130,21 +181,21 @@ function parseQuota(json) {
   return quota;
 }
 
-function fetchAccountBalance(dynamicCookie, callback) {
+function fetchAccountBalance(account, dynamicCookie, callback) {
   $httpClient.get(
     {
       url: `${UPSTREAM}/api/user/self`,
       headers: {
         Host: "anyrouter.top",
         Connection: "keep-alive",
-        "New-API-User": userId,
+        "New-API-User": account.id,
         "Cache-Control": "no-store",
         "User-Agent": USER_AGENT,
         Accept: "application/json, text/plain, */*",
         Origin: UPSTREAM,
         Referer: `${UPSTREAM}/`,
         "Accept-Language": "en,zh-CN;q=0.9,zh;q=0.8",
-        Cookie: buildSignedCookie(dynamicCookie),
+        Cookie: buildSignedCookie(dynamicCookie, account.cookie),
       },
     },
     function (error, response, data) {
@@ -180,48 +231,55 @@ function fetchAccountBalance(dynamicCookie, callback) {
   );
 }
 
-function finishWithBalance(dynamicCookie, title, message) {
-  const previousBalance = String($persistentStore.read(balanceKey) || "").trim();
+function fetchAccountBalanceAsync(account, dynamicCookie) {
+  return new Promise((resolve, reject) => {
+    fetchAccountBalance(account, dynamicCookie, function (error, balance) {
+      if (error) {
+        reject(error);
+        return;
+      }
 
-  fetchAccountBalance(dynamicCookie, function (error, balance) {
-    if (error) {
-      console.log(`anyrouter balance fetch failed: ${String(error)}`);
-      finish(title, message, "获取账户余额失败");
-      return;
-    }
-
-    $persistentStore.write(balance, balanceKey);
-    const balanceText = previousBalance
-      ? `当前账户余额：$${balance}，上次余额：$${previousBalance}`
-      : `当前账户余额：$${balance}`;
-
-    finish(title, message, balanceText);
+      resolve(balance);
+    });
   });
 }
 
-function signIn(dynamicCookie) {
+function getDynamicCookieAsync(account) {
+  return new Promise((resolve, reject) => {
+    getDynamicCookie(account, function (error, dynamicCookie) {
+      if (error) {
+        reject(error);
+        return;
+      }
+
+      resolve(dynamicCookie);
+    });
+  });
+}
+
+function signIn(account, dynamicCookie, callback) {
   const params = {
     url: `${UPSTREAM}/api/user/sign_in`,
     headers: {
       Host: "anyrouter.top",
       Connection: "keep-alive",
-      "New-API-User": userId,
+      "New-API-User": account.id,
       "Cache-Control": "no-store",
       "User-Agent": USER_AGENT,
       Accept: "application/json, text/plain, */*",
       Origin: UPSTREAM,
       Referer: `${UPSTREAM}/`,
       "Accept-Language": "en,zh-CN;q=0.9,zh;q=0.8",
-      Cookie: buildSignedCookie(dynamicCookie),
+      Cookie: buildSignedCookie(dynamicCookie, account.cookie),
     },
   };
 
   $httpClient.post(params, function (error, response, data) {
-    console.log("anyrouter sign in finished");
-    console.log(`anyrouter sign in raw body: ${String(data || "")}`);
+    console.log(`[${account.name}] anyrouter sign in finished`);
+    console.log(`[${account.name}] anyrouter sign in raw body: ${String(data || "")}`);
 
     if (error) {
-      finishWithBalance(dynamicCookie, "AnyRouter签到错误", String(error));
+      callback(error);
       return;
     }
 
@@ -230,51 +288,124 @@ function signIn(dynamicCookie) {
       json = JSON.parse(data);
     } catch (e) {
       const preview = String(data || "").slice(0, 200);
-      finishWithBalance(
-        dynamicCookie,
-        "AnyRouter返回解析失败",
-        `HTTP ${response?.status || "未知"} ${preview || String(e)}`
+      callback(
+        new Error(
+          `sign in response parse failed, HTTP ${response?.status || "未知"}, body=${preview || "<empty>"}`
+        )
       );
       return;
     }
 
-    const status = response?.status || response?.statusCode || "未知";
-    const success = Boolean(json?.success);
-    const message = extractMessage(json, "");
-
-    if (success) {
-      const text =
-        typeof message === "string" && message.trim()
-          ? message.trim()
-          : "今天已经签到过了";
-      finishWithBalance(dynamicCookie, "AnyRouter签到成功", text);
-      return;
-    }
-
-    finishWithBalance(
-      dynamicCookie,
-      "AnyRouter签到失败",
-      typeof message === "string" && message.trim()
-        ? `HTTP ${status} ${message.trim()}`
-        : JSON.stringify(json)
-    );
+    callback(null, {
+      status: response?.status || response?.statusCode || "未知",
+      success: Boolean(json?.success),
+      message: extractMessage(json, ""),
+      raw: json,
+    });
   });
 }
 
-function main() {
-  if (!sessionCookie || !/^session=/.test(sessionCookie)) {
-    finish("AnyRouter 签到错误", "", "any-cookie 需保存为 session=xxx;");
+function signInAsync(account, dynamicCookie) {
+  return new Promise((resolve, reject) => {
+    signIn(account, dynamicCookie, function (error, result) {
+      if (error) {
+        reject(error);
+        return;
+      }
+
+      resolve(result);
+    });
+  });
+}
+
+async function runAccount(account) {
+  console.log(`[${account.name}] start`);
+
+  const dynamicCookie = await getDynamicCookieAsync(account);
+  console.log(`[${account.name}] anyrouter dynamic cookie: ${dynamicCookie}`);
+
+  const signResult = await signInAsync(account, dynamicCookie);
+  const status = signResult.status;
+  const message = signResult.message;
+
+  if (!signResult.success) {
+    return {
+      name: account.name,
+      ok: false,
+      summary:
+        typeof message === "string" && message.trim()
+          ? `签到失败 HTTP ${status} ${message.trim()}`
+          : `签到失败 HTTP ${status}`,
+    };
+  }
+
+  const signText =
+    typeof message === "string" && message.trim()
+      ? message.trim()
+      : "今天已经签到过了";
+
+  const previousBalance = String($persistentStore.read(getBalanceKey(account)) || "").trim();
+
+  try {
+    const balance = await fetchAccountBalanceAsync(account, dynamicCookie);
+    $persistentStore.write(balance, getBalanceKey(account));
+
+    const balanceText = previousBalance
+      ? `当前账户余额：$${balance}，上次余额：$${previousBalance}`
+      : `当前账户余额：$${balance}`;
+
+    return {
+      name: account.name,
+      ok: true,
+      summary: `${signText}；${balanceText}`,
+    };
+  } catch (error) {
+    console.log(`[${account.name}] anyrouter balance fetch failed: ${String(error)}`);
+    return {
+      name: account.name,
+      ok: true,
+      summary: `${signText}；获取账户余额失败`,
+    };
+  }
+}
+
+function formatSummary(results) {
+  return results
+    .map((item) => `${item.name}: ${item.summary}`)
+    .join("\n");
+}
+
+async function main() {
+  const accounts = readAccounts();
+  if (!accounts.length) {
+    finish("AnyRouter 签到错误", "", "any-cookie 需保存为 JSON 数组");
     return;
   }
 
-  getDynamicCookie(function (error, dynamicCookie) {
-    if (error) {
-      finish("AnyRouter动态Cookie 获取失败", "", String(error));
-      return;
-    }
+  const results = [];
 
-    signIn(dynamicCookie);
-  });
+  for (const account of accounts) {
+    try {
+      results.push(await runAccount(account));
+    } catch (error) {
+      console.log(`[${account.name}] anyrouter run failed: ${String(error)}`);
+      results.push({
+        name: account.name,
+        ok: false,
+        summary: String(error),
+      });
+    }
+  }
+
+  const successCount = results.filter((item) => item.ok).length;
+  const subtitle = `${successCount}/${accounts.length} 成功`;
+  const message = formatSummary(results);
+  finish("AnyRouter 签到完成", subtitle, message);
 }
 
-main();
+main().catch((error) => {
+  console.log(`anyrouter main failed: ${String(error)}`);
+  if (!doneCalled) {
+    finish("AnyRouter 签到错误", "", String(error));
+  }
+});
