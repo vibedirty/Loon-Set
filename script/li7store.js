@@ -15,6 +15,14 @@ const USER_AGENT =
 let doneCalled = false;
 
 function notify(title, subtitle, message) {
+  console.log(
+    [
+      "7li store notification:",
+      `title: ${title || ""}`,
+      `subtitle: ${subtitle || ""}`,
+      `message: ${message || ""}`,
+    ].join("\n")
+  );
   $notification.post(title, subtitle || "", message || "");
 }
 
@@ -175,6 +183,16 @@ function formatMessage(earnedPoints, userPoints) {
   const total = userPoints == null || userPoints === "" ? "未知" : userPoints;
 
   return `本次签到获得${earned}积分，账户总积分${total}`;
+}
+
+function formatAccountMessage(result) {
+  const earned = result.earnedPoints == null ? "未知" : result.earnedPoints;
+  const total =
+    result.userPoints == null || result.userPoints === ""
+      ? "未知"
+      : result.userPoints;
+
+  return `${result.name}本次获得${earned}积分，总积分${total}`;
 }
 
 function formatConsecutiveDays(days) {
@@ -360,12 +378,12 @@ function finishAccountWithUserPoints(account, actions, result, callback) {
       console.log(
         `7li store ${account.name} points fetch failed: ${String(error)}`
       );
-      result.message = formatMessage(result.earnedPoints, null);
+      result.userPoints = null;
       callback(result);
       return;
     }
 
-    result.message = formatMessage(result.earnedPoints, userPoints);
+    result.userPoints = userPoints;
     callback(result);
   });
 }
@@ -383,6 +401,7 @@ function signInAccount(account, actions, callback) {
           name: account.name,
           status: "error",
           subtitle: String(error),
+          rawError: String(error),
           earnedPoints: 0,
         },
         callback
@@ -403,6 +422,7 @@ function signInAccount(account, actions, callback) {
           name: account.name,
           status: "error",
           subtitle: preview || String(e),
+          rawError: preview || String(e),
           earnedPoints: 0,
         },
         callback
@@ -426,13 +446,15 @@ function signInAccount(account, actions, callback) {
     }
 
     const errorMessage = String(json.error || json.message || "").trim();
+    const isDuplicate = /重复|已.*签|already|checked.?in/i.test(errorMessage);
     finishAccountWithUserPoints(
       account,
       actions,
       {
         name: account.name,
-        status: "failed",
+        status: isDuplicate ? "duplicate" : "failed",
         subtitle: errorMessage || JSON.stringify(json),
+        rawError: errorMessage || JSON.stringify(json),
         earnedPoints: json.points || 0,
       },
       callback
@@ -441,23 +463,20 @@ function signInAccount(account, actions, callback) {
 }
 
 function formatAccountResult(result) {
-  const statusText = {
-    success: "成功",
-    failed: "失败",
-    error: "错误",
-  }[result.status];
-  const subtitle = result.subtitle ? `，${result.subtitle}` : "";
+  if (result.status === "success") {
+    return `${result.name}成功`;
+  }
 
-  return `${result.name}：${statusText}${subtitle}，${result.message}`;
+  if (result.status === "duplicate") {
+    return `${result.name}重复签到`;
+  }
+
+  return result.rawError || result.subtitle || "失败";
 }
 
 function finishAll(results) {
-  const successCount = results.filter(function (result) {
-    return result.status === "success";
-  }).length;
-  const failedCount = results.length - successCount;
-  const subtitle = `成功 ${successCount} / 失败 ${failedCount}`;
-  const message = results.map(formatAccountResult).join("\n");
+  const subtitle = results.map(formatAccountResult).join("；");
+  const message = results.map(formatAccountMessage).join("\n");
 
   finish("7li store 多账户签到完成", subtitle, message);
 }
