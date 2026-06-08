@@ -1,4 +1,4 @@
-const sessionCookie = String($persistentStore.read("li7-cookie") || "").trim();
+const storedCookieValue = String($persistentStore.read("li7-cookie") || "").trim();
 
 const UPSTREAM = "https://store.7li7li.com";
 const DEFAULT_ACTIONS = {
@@ -30,6 +30,82 @@ function finish(title, subtitle, message) {
 
   doneCalled = true;
   $done();
+}
+
+function normalizeAccount(account, index) {
+  if (!account || typeof account !== "object") {
+    return null;
+  }
+
+  const cookie = String(account.cookie || "").trim();
+  if (!cookie) {
+    return null;
+  }
+
+  return {
+    name: String(account.name || `账号${index + 1}`).trim() || `账号${index + 1}`,
+    cookie,
+  };
+}
+
+function parseLooseAccounts(raw) {
+  const accounts = [];
+  const objectMatches = String(raw || "").match(/\{[\s\S]*?\}/g) || [];
+
+  for (let i = 0; i < objectMatches.length; i++) {
+    const text = objectMatches[i];
+    const nameMatch = text.match(/(?:^|[,{]\s*)"?name"?\s*:\s*["']([^"']+)["']/);
+    const cookieMatch = text.match(
+      /(?:^|[,{]\s*)"?cookie"?\s*:\s*["']([^"']+)["']/
+    );
+
+    const account = normalizeAccount(
+      {
+        name: nameMatch ? nameMatch[1] : "",
+        cookie: cookieMatch ? cookieMatch[1] : "",
+      },
+      i
+    );
+
+    if (account) {
+      accounts.push(account);
+    }
+  }
+
+  return accounts;
+}
+
+function parseAccounts(raw) {
+  if (!raw) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      return parsed
+        .map(function (account, index) {
+          return normalizeAccount(account, index);
+        })
+        .filter(Boolean);
+    }
+
+    if (parsed && typeof parsed === "object" && parsed.cookie) {
+      const account = normalizeAccount(parsed, 0);
+      return account ? [account] : [];
+    }
+
+    if (typeof parsed === "string" && parsed.trim()) {
+      return [{ name: "账号1", cookie: parsed.trim() }];
+    }
+  } catch (e) {
+    const looseAccounts = parseLooseAccounts(raw);
+    if (looseAccounts.length) {
+      return looseAccounts;
+    }
+  }
+
+  return [{ name: "账号1", cookie: raw }];
 }
 
 function extractActionValues(text) {
@@ -144,7 +220,7 @@ function extractChunkPaths(html) {
   return paths;
 }
 
-function scanActionChunks(chunkPaths, index, actions, callback) {
+function scanActionChunks(cookie, chunkPaths, index, actions, callback) {
   if (actions.checkIn && actions.getUserPoints) {
     callback(null, actions);
     return;
@@ -169,12 +245,13 @@ function scanActionChunks(chunkPaths, index, actions, callback) {
         Accept: "*/*",
         Referer: `${UPSTREAM}/`,
         "Accept-Language": "en,zh-CN;q=0.9,zh;q=0.8",
-        Cookie: sessionCookie,
+        Cookie: cookie,
       },
     },
     function (chunkError, chunkResponse, chunkData) {
       const found = chunkError ? {} : parseActionReferences(chunkData);
       scanActionChunks(
+        cookie,
         chunkPaths,
         index + 1,
         {
@@ -187,7 +264,7 @@ function scanActionChunks(chunkPaths, index, actions, callback) {
   );
 }
 
-function fetchCurrentActions(callback) {
+function fetchCurrentActions(cookie, callback) {
   $httpClient.get(
     {
       url: `${UPSTREAM}/`,
@@ -197,7 +274,7 @@ function fetchCurrentActions(callback) {
         Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         Referer: `${UPSTREAM}/`,
         "Accept-Language": "en,zh-CN;q=0.9,zh;q=0.8",
-        Cookie: sessionCookie,
+        Cookie: cookie,
       },
     },
     function (error, response, data) {
@@ -212,13 +289,13 @@ function fetchCurrentActions(callback) {
         return;
       }
 
-      scanActionChunks(chunkPaths, 0, {}, callback);
+      scanActionChunks(cookie, chunkPaths, 0, {}, callback);
     }
   );
 }
 
-function resolveActions(callback) {
-  fetchCurrentActions(function (error, actions) {
+function resolveActions(cookie, callback) {
+  fetchCurrentActions(cookie, function (error, actions) {
     if (error) {
       console.log(`7li store action discovery failed: ${String(error)}`);
       callback(DEFAULT_ACTIONS);
@@ -232,7 +309,7 @@ function resolveActions(callback) {
   });
 }
 
-function requestAction(action, callback) {
+function requestAction(account, action, callback) {
   $httpClient.post(
     {
       url: `${UPSTREAM}/`,
@@ -249,7 +326,7 @@ function requestAction(action, callback) {
         Origin: UPSTREAM,
         Referer: `${UPSTREAM}/`,
         "Accept-Language": "en,zh-CN;q=0.9,zh;q=0.8",
-        Cookie: sessionCookie,
+        Cookie: account.cookie,
       },
       body: "[]",
     },
@@ -257,10 +334,12 @@ function requestAction(action, callback) {
   );
 }
 
-function fetchUserPoints(actions, callback) {
-  requestAction(actions.getUserPoints, function (error, response, data) {
-    console.log("7li store points fetch finished");
-    console.log(`7li store points raw body: ${String(data || "")}`);
+function fetchUserPoints(account, actions, callback) {
+  requestAction(account, actions.getUserPoints, function (error, response, data) {
+    console.log(`7li store ${account.name} points fetch finished`);
+    console.log(
+      `7li store ${account.name} points raw body: ${String(data || "")}`
+    );
 
     if (error) {
       callback(error);
@@ -275,25 +354,39 @@ function fetchUserPoints(actions, callback) {
   });
 }
 
-function finishWithUserPoints(actions, title, subtitle, earnedPoints) {
-  fetchUserPoints(actions, function (error, userPoints) {
+function finishAccountWithUserPoints(account, actions, result, callback) {
+  fetchUserPoints(account, actions, function (error, userPoints) {
     if (error) {
-      console.log(`7li store points fetch failed: ${String(error)}`);
-      finish(title, subtitle, formatMessage(earnedPoints, null));
+      console.log(
+        `7li store ${account.name} points fetch failed: ${String(error)}`
+      );
+      result.message = formatMessage(result.earnedPoints, null);
+      callback(result);
       return;
     }
 
-    finish(title, subtitle, formatMessage(earnedPoints, userPoints));
+    result.message = formatMessage(result.earnedPoints, userPoints);
+    callback(result);
   });
 }
 
-function signIn(actions) {
-  requestAction(actions.checkIn, function (error, response, data) {
-    console.log("7li store sign in finished");
-    console.log(`7li store raw body: ${String(data || "")}`);
+function signInAccount(account, actions, callback) {
+  requestAction(account, actions.checkIn, function (error, response, data) {
+    console.log(`7li store ${account.name} sign in finished`);
+    console.log(`7li store ${account.name} raw body: ${String(data || "")}`);
 
     if (error) {
-      finishWithUserPoints(actions, "7li store 签到错误", String(error), 0);
+      finishAccountWithUserPoints(
+        account,
+        actions,
+        {
+          name: account.name,
+          status: "error",
+          subtitle: String(error),
+          earnedPoints: 0,
+        },
+        callback
+      );
       return;
     }
 
@@ -303,37 +396,95 @@ function signIn(actions) {
       json = extractSignInResult(data);
     } catch (e) {
       const preview = String(data || "").slice(0, 200);
-      finishWithUserPoints(actions, "7li store 签到错误", preview || String(e), 0);
+      finishAccountWithUserPoints(
+        account,
+        actions,
+        {
+          name: account.name,
+          status: "error",
+          subtitle: preview || String(e),
+          earnedPoints: 0,
+        },
+        callback
+      );
       return;
     }
 
     if (json.success) {
-      finishWithUserPoints(
+      finishAccountWithUserPoints(
+        account,
         actions,
-        "7li store 签到成功",
-        formatConsecutiveDays(json.consecutiveDays),
-        json.points
+        {
+          name: account.name,
+          status: "success",
+          subtitle: formatConsecutiveDays(json.consecutiveDays),
+          earnedPoints: json.points,
+        },
+        callback
       );
       return;
     }
 
     const errorMessage = String(json.error || json.message || "").trim();
-    finishWithUserPoints(
+    finishAccountWithUserPoints(
+      account,
       actions,
-      "7li store 签到失败",
-      errorMessage || JSON.stringify(json),
-      json.points || 0
+      {
+        name: account.name,
+        status: "failed",
+        subtitle: errorMessage || JSON.stringify(json),
+        earnedPoints: json.points || 0,
+      },
+      callback
     );
   });
 }
 
+function formatAccountResult(result) {
+  const statusText = {
+    success: "成功",
+    failed: "失败",
+    error: "错误",
+  }[result.status];
+  const subtitle = result.subtitle ? `，${result.subtitle}` : "";
+
+  return `${result.name}：${statusText}${subtitle}，${result.message}`;
+}
+
+function finishAll(results) {
+  const successCount = results.filter(function (result) {
+    return result.status === "success";
+  }).length;
+  const failedCount = results.length - successCount;
+  const subtitle = `成功 ${successCount} / 失败 ${failedCount}`;
+  const message = results.map(formatAccountResult).join("\n");
+
+  finish("7li store 多账户签到完成", subtitle, message);
+}
+
+function signInAccounts(accounts, actions, index, results) {
+  if (index >= accounts.length) {
+    finishAll(results);
+    return;
+  }
+
+  signInAccount(accounts[index], actions, function (result) {
+    results.push(result);
+    signInAccounts(accounts, actions, index + 1, results);
+  });
+}
+
 function main() {
-  if (!sessionCookie) {
+  const accounts = parseAccounts(storedCookieValue);
+
+  if (!accounts.length) {
     finish("签到错误", "7li-cookie 为空，请先保存登录 Cookie", formatMessage(0, null));
     return;
   }
 
-  resolveActions(signIn);
+  resolveActions(accounts[0].cookie, function (actions) {
+    signInAccounts(accounts, actions, 0, []);
+  });
 }
 
 main();
