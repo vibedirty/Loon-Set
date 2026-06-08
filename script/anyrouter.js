@@ -33,7 +33,7 @@ function finish(title, subtitle, message) {
 function normalizeAccount(account, index) {
   const item = account || {};
   const name = String(item.name || `账号${index + 1}`).trim();
-  let cookie = String(item.cookie || "").trim();
+  let cookie = String(item.cookie || "").trim().replace(/^cookie:\s*/i, "");
   const id = String(item.id ?? "").trim();
 
   if (cookie && !/^session=/.test(cookie) && !/[=;]/.test(cookie)) {
@@ -95,12 +95,18 @@ function extractMessage(json, fallback) {
   );
 }
 
-function buildSignedCookie(dynamicCookie, accountCookie) {
-  if (!accountCookie) {
-    return dynamicCookie;
-  }
+function removeDynamicCookie(accountCookie) {
+  return String(accountCookie || "")
+    .split(";")
+    .map((item) => item.trim())
+    .filter((item) => item && !/^acw_sc__v2=/i.test(item))
+    .join("; ");
+}
 
-  return `${dynamicCookie}; ${accountCookie}`;
+function buildSignedCookie(dynamicCookie, accountCookie) {
+  const staticCookie = removeDynamicCookie(accountCookie);
+
+  return [dynamicCookie, staticCookie].filter(Boolean).join("; ");
 }
 
 function computeAcwCookie(arg1) {
