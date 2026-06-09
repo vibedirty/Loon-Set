@@ -3,8 +3,10 @@
 // ^https:\/\/m\.pinduoduo\.net\/tandy_vase\.html\?.*$ script-path=<your-url>/loon_tandy_vase_auto_click_inject.js, requires-body=true, timeout=10, tag=拼多多券自动确认注入
 
 (function () {
-  const v = '2026-06-09 15:50:00';
+  const v = '2026-06-09 16:05:00';
   const DEBUG_NOTIFY = true;
+  const INJECT_BEFORE_MS = 10 * 60 * 1000;
+  const GRACE_AFTER_TARGET_MS_OUTER = 60 * 1000;
 
   function loonLog(subtitle, message, notify) {
     try {
@@ -230,7 +232,13 @@
     if (!activeTarget) return false;
 
     var now = Date.now();
-    if (now < activeTarget.ts) return false;
+    if (now < activeTarget.ts) {
+      if (now < activeTarget.ts - PREPARE_BEFORE_MS) {
+        cleanupTimers();
+        scheduleNextTarget();
+      }
+      return false;
+    }
 
     var btn = findConfirmButton();
     if (!btn) return false;
@@ -280,7 +288,7 @@
       var now = Date.now();
       if (now >= activeTarget.ts && now <= activeTarget.ts + GRACE_AFTER_TARGET_MS) {
         clickButton(btn);
-      } else if (now < activeTarget.ts) {
+      } else if (now >= activeTarget.ts - PREPARE_BEFORE_MS) {
         startHighFreqPolling();
       }
     });
@@ -311,6 +319,7 @@
 
   function getNextTargetInfo() {
     const now = new Date();
+    const nowTs = now.getTime();
     const candidates = targetTimes
       .map(function (t) {
         const parts = t.split(':');
@@ -329,21 +338,30 @@
       .filter(function (item) { return !Number.isNaN(item.ts); })
       .sort(function (a, b) { return a.ts - b.ts; });
 
-    if (!candidates.length) return { label: '未知时间', waitText: '未知时间' };
+    if (!candidates.length) return { label: '未知时间', waitText: '未知时间', diffMs: Infinity };
 
-    let target = candidates.find(function (item) { return item.ts > now.getTime(); });
+    let target = candidates.find(function (item) {
+      return nowTs <= item.ts + GRACE_AFTER_TARGET_MS_OUTER;
+    });
+
     if (!target) {
       target = { label: candidates[0].label + ' 明天', ts: candidates[0].ts + 24 * 60 * 60 * 1000 };
     }
 
-    const diffMs = Math.max(0, target.ts - now.getTime());
+    const diffMs = Math.max(0, target.ts - nowTs);
     const totalSeconds = Math.ceil(diffMs / 1000);
     const minutes = Math.floor(totalSeconds / 60);
     const seconds = totalSeconds % 60;
-    return { label: target.label, waitText: minutes + '分钟' + seconds + '秒' };
+    return { label: target.label, waitText: minutes + '分钟' + seconds + '秒', diffMs: diffMs };
   }
 
   const nextTargetInfo = getNextTargetInfo();
+
+  if (nextTargetInfo.diffMs > INJECT_BEFORE_MS) {
+    loonLog('无需注入', '距离下次自动兑换还有' + nextTargetInfo.waitText + '（' + nextTargetInfo.label + '），仅执行复写');
+    $done({ body });
+    return;
+  }
 
   const newBody = body.replace(/<\/body>/i, injected + '</body>');
   loonLog('注入成功', '将在' + nextTargetInfo.waitText + '后自动兑换（' + nextTargetInfo.label + '）', true);
