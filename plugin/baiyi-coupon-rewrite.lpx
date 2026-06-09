@@ -4,7 +4,7 @@
 #!icon=https://raw.githubusercontent.com/luestr/IconResource/main/App_icon/120px/PinDuoDuo.png
 
 [Script]
-http-response ^https:\/\/m\.pinduoduo\.net\/tandy_vase\.html\?.*$ script-path=https://raw.githubusercontent.com/vibedirty/Loon-Set/main/script/loon_tandy_vase_auto_click_inject.js, requires-body=true, tag=自动点击注入
+http-response ^https:\/\/m\.pinduoduo\.net\/tandy_vase\.html\?.*$ script-path=https://raw.githubusercontent.com/vibedirty/Loon-Set/main/script/loon_tandy_vase_auto_click_inject.js, requires-body=true, argument = "['10:00:00', '16:00:00', '21:00:00']", tag=自动点击注入
 
 [MITM]
 hostname = m.pinduoduo.net

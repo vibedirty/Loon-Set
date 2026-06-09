@@ -3,25 +3,64 @@
 // ^https:\/\/m\.pinduoduo\.net\/tandy_vase\.html\?.*$ script-path=<your-url>/loon_tandy_vase_auto_click_inject.js, requires-body=true, timeout=10, tag=拼多多券自动确认注入
 
 (function () {
+  const v = '2026-06-09 15:50:00';
   const DEBUG_NOTIFY = true;
 
-  function loonLog(subtitle, message) {
+  function loonLog(subtitle, message, notify) {
     try {
-      console.log('[券脚本] ' + subtitle + ' ' + (message || ''));
+      console.log('[券脚本][' + v + '] ' + subtitle + ' ' + (message || ''));
     } catch (e) {}
 
     try {
-      if (DEBUG_NOTIFY && typeof $notification !== 'undefined') {
-        $notification.post('券脚本', subtitle, message || '');
+      if (DEBUG_NOTIFY && notify && typeof $notification !== 'undefined') {
+        $notification.post('拼多多注入脚本', subtitle, message || '');
       }
     } catch (e) {}
   }
 
+  function parseTargetTimes() {
+    const fallback = ['10:00:00', '16:00:00', '21:00:00'];
+
+    try {
+      if (typeof $argument === 'undefined' || !$argument) return fallback;
+
+      let raw = String($argument).trim();
+
+      // 支持：argument = "['10:00:00', '16:00:00']"
+      // 也支持：argument = '["10:00:00", "16:00:00"]'
+      // 以及外层再次被双引号包裹的情况。
+      if ((raw[0] === '"' && raw[raw.length - 1] === '"') || (raw[0] === "'" && raw[raw.length - 1] === "'")) {
+        raw = raw.slice(1, -1);
+      }
+
+      raw = raw.replace(/'/g, '"');
+      const parsed = JSON.parse(raw);
+      const times = Array.isArray(parsed) ? parsed : [];
+      const valid = times
+        .map(function (t) { return String(t).trim(); })
+        .filter(function (t) { return /^\d{1,2}:\d{2}:\d{2}(?:\.\d{1,3})?$/.test(t); });
+
+      return valid.length ? valid : fallback;
+    } catch (e) {
+      loonLog('参数解析失败', String(e && e.message || e));
+      return fallback;
+    }
+  }
+
+  const targetTimes = parseTargetTimes();
+  const targetTimesJson = JSON.stringify(targetTimes);
+  const rewriteHourMinutePattern = targetTimes
+    .map(function (t) { return t.slice(0, 5).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); })
+    .filter(function (value, index, arr) { return arr.indexOf(value) === index; })
+    .join('|');
+
   let body = ($response && $response.body) || '';
-  loonLog('收到 response', 'url: ' + (($request && $request.url) || 'unknown') + ', body length: ' + body.length);
+  loonLog('收到 response', 'url: ' + (($request && $request.url) || 'unknown') + ', body length: ' + body.length + ', times: ' + targetTimes.join('/'));
 
   // 原 [Rewrite] 逻辑合并到 response script，避免同一 URL 上 Rewrite 与 Script 冲突。
-  body = body.replace(/((?:10:00|16:00|21:00))开抢/g, '$1准备好了吗');
+  if (rewriteHourMinutePattern) {
+    body = body.replace(new RegExp('((?:' + rewriteHourMinutePattern + '))开抢', 'g'), '$1准备好了吗');
+  }
   body = body.replace(/"couponType":2/g, '"couponType":0');
 
   if (!body || body.indexOf('</body>') === -1) {
@@ -45,7 +84,7 @@
    * 自动点击确认兑换的三个时间点。
    * 页面时间使用设备本地时间。
    */
-  var TARGET_TIMES = ['10:00:00', '16:00:00', '21:00:00', '15:20:00'];
+  var TARGET_TIMES = ${targetTimesJson};
 
   /** 到点后多少毫秒内，如果弹窗刚出现，也立即点击。 */
   var GRACE_AFTER_TARGET_MS = 60 * 1000;
@@ -57,46 +96,11 @@
   var POLL_INTERVAL_MS = 20;
 
   var clicked = false;
+  var clickStarted = false;
   var highFreqTimer = null;
   var scheduleTimer = null;
   var observer = null;
   var activeTarget = null;
-
-  function showToast(message, duration) {
-    duration = duration || 1400;
-
-    try {
-      var old = document.getElementById('__pdd_auto_confirm_toast__');
-      if (old) old.remove();
-
-      var el = document.createElement('div');
-      el.id = '__pdd_auto_confirm_toast__';
-      el.textContent = message;
-      el.style.cssText = [
-        'position:fixed',
-        'left:50%',
-        'top:50%',
-        'transform:translate(-50%,-50%)',
-        'z-index:2147483647',
-        'max-width:78vw',
-        'padding:10px 14px',
-        'border-radius:8px',
-        'background:rgba(0,0,0,.78)',
-        'color:#fff',
-        'font-size:14px',
-        'line-height:1.4',
-        'text-align:center',
-        'word-break:break-all',
-        'box-shadow:0 4px 16px rgba(0,0,0,.25)',
-        'pointer-events:none'
-      ].join(';');
-
-      document.documentElement.appendChild(el);
-      setTimeout(function () {
-        if (el && el.parentNode) el.parentNode.removeChild(el);
-      }, duration);
-    } catch (e) {}
-  }
 
   function parseTodayTime(timeText) {
     var m = /^(\\d{1,2}):(\\d{2}):(\\d{2})(?:\\.(\\d{1,3}))?$/.exec(timeText);
@@ -185,10 +189,18 @@
   }
 
   function clickButton(btn) {
-    if (!btn || clicked) return false;
+    if (!btn || clicked || clickStarted) return false;
+
+    clickStarted = true;
     clicked = true;
     cleanupTimers();
-    showToast('自动点击确认兑换');
+
+    if (observer) {
+      try { observer.disconnect(); } catch (e) {}
+      observer = null;
+    }
+
+    var targetLabel = activeTarget && activeTarget.label || 'unknown';
 
     try {
       btn.click();
@@ -203,7 +215,9 @@
         return true;
       } catch (err) {
         clicked = false;
-        showToast('自动点击失败：' + err.message, 2200);
+        clickStarted = false;
+        observePopup();
+        startHighFreqPolling();
         return false;
       }
     }
@@ -212,7 +226,7 @@
   function tryClickIfTimeReached() {
     if (clicked) return true;
 
-    activeTarget = activeTarget || getActiveTarget();
+    activeTarget = getActiveTarget();
     if (!activeTarget) return false;
 
     var now = Date.now();
@@ -241,14 +255,12 @@
     var diff = activeTarget.ts - now;
 
     if (diff <= 0) {
-      showToast('已到 ' + activeTarget.label + '，等待确认弹窗');
       startHighFreqPolling();
       return;
     }
 
     var wait = Math.max(0, diff - PREPARE_BEFORE_MS);
     scheduleTimer = setTimeout(function () {
-      showToast('进入自动点击检测：' + activeTarget.label, 1200);
       startHighFreqPolling();
     }, wait);
   }
@@ -262,7 +274,7 @@
       var btn = findConfirmButton();
       if (!btn) return;
 
-      activeTarget = activeTarget || getActiveTarget();
+      activeTarget = getActiveTarget();
       if (!activeTarget) return;
 
       var now = Date.now();
@@ -281,7 +293,6 @@
 
   observePopup();
   scheduleNextTarget();
-  showToast('券脚本已注入，目标：' + TARGET_TIMES.join(' / '), 2600);
 
   window.__PDD_TANDY_VASE_AUTO_CONFIRM_DEBUG__ = {
     times: TARGET_TIMES,
@@ -290,7 +301,6 @@
     clickNow: function () {
       var btn = findConfirmButton();
       if (!btn) {
-        showToast('未找到确认兑换按钮');
         return false;
       }
       return clickButton(btn);
@@ -299,7 +309,43 @@
 })();
 </script>`;
 
+  function getNextTargetInfo() {
+    const now = new Date();
+    const candidates = targetTimes
+      .map(function (t) {
+        const parts = t.split(':');
+        const msParts = (parts[2] || '0').split('.');
+        const d = new Date(
+          now.getFullYear(),
+          now.getMonth(),
+          now.getDate(),
+          Number(parts[0]),
+          Number(parts[1]),
+          Number(msParts[0]),
+          Number((msParts[1] || '0').padEnd(3, '0'))
+        );
+        return { label: t, ts: d.getTime() };
+      })
+      .filter(function (item) { return !Number.isNaN(item.ts); })
+      .sort(function (a, b) { return a.ts - b.ts; });
+
+    if (!candidates.length) return { label: '未知时间', waitText: '未知时间' };
+
+    let target = candidates.find(function (item) { return item.ts > now.getTime(); });
+    if (!target) {
+      target = { label: candidates[0].label + ' 明天', ts: candidates[0].ts + 24 * 60 * 60 * 1000 };
+    }
+
+    const diffMs = Math.max(0, target.ts - now.getTime());
+    const totalSeconds = Math.ceil(diffMs / 1000);
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    return { label: target.label, waitText: minutes + '分钟' + seconds + '秒' };
+  }
+
+  const nextTargetInfo = getNextTargetInfo();
+
   const newBody = body.replace(/<\/body>/i, injected + '</body>');
-  loonLog('注入成功', 'body: ' + body.length + ' -> ' + newBody.length);
+  loonLog('注入成功', '将在' + nextTargetInfo.waitText + '后自动兑换（' + nextTargetInfo.label + '）', true);
   $done({ body: newBody });
 })();
