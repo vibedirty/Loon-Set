@@ -3,7 +3,7 @@
   const DEBUG_NOTIFY = true;
   const INJECT_BEFORE_MS = 10 * 60 * 1000;
   const GRACE_AFTER_TARGET_MS_OUTER = 60 * 1000;
-  const fallback = ['10:00:00', '16:00:00', '21:00:00', '17:25:00'];
+  const fallback = ['10:00:00', '16:00:00', '21:00:00'];
 
   function loonLog(subtitle, message, notify) {
     try {
