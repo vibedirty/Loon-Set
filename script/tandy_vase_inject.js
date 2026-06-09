@@ -1,7 +1,3 @@
-// Loon http-response script: inject auto-click code into tandy_vase.html
-// Usage in plugin:
-// ^https:\/\/m\.pinduoduo\.net\/tandy_vase\.html\?.*$ script-path=<your-url>/loon_tandy_vase_auto_click_inject.js, requires-body=true, timeout=10, tag=拼多多券自动确认注入
-
 (function () {
   const v = '2026-06-09 16:05:00';
   const DEBUG_NOTIFY = true;
