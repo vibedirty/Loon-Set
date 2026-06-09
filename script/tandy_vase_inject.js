@@ -20,6 +20,7 @@
     const fallback = ['10:00:00', '16:00:00', '21:00:00'];
 
     try {
+      loonLog('获取到argument', $argument);
       if (typeof $argument === 'undefined' || !$argument) return fallback;
 
       let raw = String($argument).trim();
