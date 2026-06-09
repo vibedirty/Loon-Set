@@ -3,14 +3,31 @@
 // ^https:\/\/m\.pinduoduo\.net\/tandy_vase\.html\?.*$ script-path=<your-url>/loon_tandy_vase_auto_click_inject.js, requires-body=true, timeout=10, tag=拼多多券自动确认注入
 
 (function () {
+  const DEBUG_NOTIFY = true;
+
+  function loonLog(subtitle, message) {
+    try {
+      console.log('[券脚本] ' + subtitle + ' ' + (message || ''));
+    } catch (e) {}
+
+    try {
+      if (DEBUG_NOTIFY && typeof $notification !== 'undefined') {
+        $notification.post('券脚本', subtitle, message || '');
+      }
+    } catch (e) {}
+  }
+
   const body = ($response && $response.body) || '';
+  loonLog('收到 response', 'url: ' + (($request && $request.url) || 'unknown') + ', body length: ' + body.length);
 
   if (!body || body.indexOf('</body>') === -1) {
+    loonLog('未注入', 'response body 为空或没有 </body>');
     $done({ body });
     return;
   }
 
   if (body.indexOf('__PDD_TANDY_VASE_AUTO_CONFIRM_INJECTED__') !== -1) {
+    loonLog('跳过注入', 'HTML 中已存在注入标记');
     $done({ body });
     return;
   }
@@ -24,7 +41,7 @@
    * 自动点击确认兑换的三个时间点。
    * 页面时间使用设备本地时间。
    */
-  var TARGET_TIMES = ['10:00:00', '16:00:00', '21:00:00', '14:40:00'];
+  var TARGET_TIMES = ['10:00:00', '16:00:00', '21:00:00', '14:54:00'];
 
   /** 到点后多少毫秒内，如果弹窗刚出现，也立即点击。 */
   var GRACE_AFTER_TARGET_MS = 60 * 1000;
@@ -260,6 +277,7 @@
 
   observePopup();
   scheduleNextTarget();
+  showToast('券脚本已注入，目标：' + TARGET_TIMES.join(' / '), 2600);
 
   window.__PDD_TANDY_VASE_AUTO_CONFIRM_DEBUG__ = {
     times: TARGET_TIMES,
@@ -278,5 +296,6 @@
 </script>`;
 
   const newBody = body.replace(/<\/body>/i, injected + '</body>');
+  loonLog('注入成功', 'body: ' + body.length + ' -> ' + newBody.length);
   $done({ body: newBody });
 })();
