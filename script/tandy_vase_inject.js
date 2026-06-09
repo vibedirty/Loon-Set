@@ -3,6 +3,7 @@
   const DEBUG_NOTIFY = true;
   const INJECT_BEFORE_MS = 10 * 60 * 1000;
   const GRACE_AFTER_TARGET_MS_OUTER = 60 * 1000;
+  const fallback = ['10:00:00', '16:00:00', '21:00:00', '17:25:00'];
 
   function loonLog(subtitle, message, notify) {
     try {
@@ -16,37 +17,7 @@
     } catch (e) {}
   }
 
-  function parseTargetTimes() {
-    const fallback = ['10:00:00', '16:00:00', '21:00:00'];
-
-    try {
-      loonLog('获取到argument', $argument);
-      if (typeof $argument === 'undefined' || !$argument) return fallback;
-
-      let raw = String($argument).trim();
-
-      // 支持：argument = "['10:00:00', '16:00:00']"
-      // 也支持：argument = '["10:00:00", "16:00:00"]'
-      // 以及外层再次被双引号包裹的情况。
-      if ((raw[0] === '"' && raw[raw.length - 1] === '"') || (raw[0] === "'" && raw[raw.length - 1] === "'")) {
-        raw = raw.slice(1, -1);
-      }
-
-      raw = raw.replace(/'/g, '"');
-      const parsed = JSON.parse(raw);
-      const times = Array.isArray(parsed) ? parsed : [];
-      const valid = times
-        .map(function (t) { return String(t).trim(); })
-        .filter(function (t) { return /^\d{1,2}:\d{2}:\d{2}(?:\.\d{1,3})?$/.test(t); });
-
-      return valid.length ? valid : fallback;
-    } catch (e) {
-      loonLog('参数解析失败', String(e && e.message || e));
-      return fallback;
-    }
-  }
-
-  const targetTimes = parseTargetTimes();
+  const targetTimes = fallback;
   const targetTimesJson = JSON.stringify(targetTimes);
   const rewriteHourMinutePattern = targetTimes
     .map(function (t) { return t.slice(0, 5).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); })
