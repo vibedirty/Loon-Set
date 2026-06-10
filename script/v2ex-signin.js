@@ -14,20 +14,34 @@ function parseBalance(html) {
   const m = html.match(/class="balance_area[^"]*"[^>]*>([\s\S]*?)<\/div>/);
   if (!m) return null;
   const text = m[1].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+  const paired = [...text.matchAll(/(\d+)\s*(金|银|铜)/g)].map((m) => `${m[1]} ${m[2]}`);
+  if (paired.length) return paired.join(' ');
   const nums = text.match(/\d+/g);
   if (!nums) return null;
   const labels = ['金', '银', '铜'];
-  const offset = labels.length - nums.length;
-  return nums.map((n, i) => `${n} ${labels[i + offset]}`).join(' ');
+  const offset = Math.max(0, labels.length - nums.length);
+  return nums.map((n, i) => `${n} ${labels[i + offset] || ''}`.trim()).join(' ');
 }
 
 function parseDays(html) {
-  const m = html.match(/已连续登录\s*(\d+)\s*天/);
+  const m = html.match(/(?:已|已经)?连续(?:登录|签到)\s*(\d+)\s*天/);
   return m ? m[1] : null;
 }
 
-function isLoggedIn(html) {
-  return /href="\/signout\?once=/.test(html) || /href="\/settings"/.test(html);
+function isSignInPage(html) {
+  return /You need to sign in first to view this page/.test(html)
+    || /\bUsername\b/.test(html)
+    || /\bPassword\b/.test(html)
+    || /Are you robot\?/.test(html);
+}
+
+function findDailyRedeemPath(html) {
+  const target = '/mission/daily/redeem';
+  const startIndex = html.indexOf(target);
+  if (startIndex === -1) return null;
+  const tail = html.slice(startIndex);
+  const endIndex = tail.search(/["'<> \t\r\n]/);
+  return endIndex === -1 ? tail : tail.slice(0, endIndex);
 }
 
 function httpGet(url, extraHeaders) {
@@ -64,29 +78,31 @@ async function main() {
     notifyFail(`获取签到页失败: HTTP ${daily.status}`);
     return;
   }
-  if (!isLoggedIn(daily.body)) {
+  if (isSignInPage(daily.body)) {
     notifyFail('Cookie 已失效或未登录');
     return;
   }
 
-  const onceMatch = daily.body.match(/\/mission\/daily\/redeem\?once=(\d+)/);
+  const redeemPath = findDailyRedeemPath(daily.body);
   let alreadySigned = false;
 
-  if (!onceMatch) {
+  if (!redeemPath) {
     console.log('今天已经签到过了');
     alreadySigned = true;
   } else {
-    const once = onceMatch[1];
-    console.log(`执行签到 (once=${once})...`);
-    const redeem = await httpGet(
-      `https://v2ex.com/mission/daily/redeem?once=${once}`,
-      { Referer: 'https://v2ex.com/mission/daily' },
-    );
+    console.log(`执行签到 (${redeemPath})...`);
+    const redeem = await httpGet(`https://v2ex.com${redeemPath}`, {
+      Referer: 'https://v2ex.com/mission/daily',
+    });
     if (redeem.status !== 302 && redeem.status !== 200) {
       notifyFail(`签到接口返回异常: HTTP ${redeem.status}`);
       return;
     }
-    console.log('签到成功');
+    if (/每日登录奖励已领取|今天已经签到过了|已连续登录/.test(redeem.body)) {
+      console.log('签到成功');
+    } else {
+      console.log('签到请求已完成');
+    }
   }
 
   const after = await httpGet('https://v2ex.com/mission/daily');
