@@ -11,9 +11,15 @@ const baseHeaders = {
 };
 
 function parseBalance(html) {
-  const m = html.match(/class="balance_area[^"]*"[^>]*>([\s\S]*?)<\/div>/);
+  const m = html.match(/<([a-z][\w:-]*)\b[^>]*class=["'][^"']*\bbalance_area\b[^"']*["'][^>]*>([\s\S]*?)<\/\1>/i);
   if (!m) return null;
-  const text = m[1].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+  const balanceHtml = m[2];
+  const imgLabels = { G: '金', S: '银', B: '铜' };
+  const imgPaired = [...balanceHtml.matchAll(/(\d+)\s*<img\b[^>]*\balt=["']([GSB])["'][^>]*>/gi)]
+    .map((m) => `${m[1]} ${imgLabels[m[2].toUpperCase()]}`);
+  if (imgPaired.length) return imgPaired.join(' ');
+
+  const text = balanceHtml.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
   const paired = [...text.matchAll(/(\d+)\s*(金|银|铜)/g)].map((m) => `${m[1]} ${m[2]}`);
   if (paired.length) return paired.join(' ');
   const nums = text.match(/\d+/g);
@@ -106,8 +112,12 @@ async function main() {
   }
 
   const after = await httpGet('https://v2ex.com/mission/daily');
-  const days = parseDays(after.body);
-  const balance = parseBalance(after.body);
+  const resultBody = after.status === 200 && after.body ? after.body : daily.body;
+  if (after.status !== 200) {
+    console.log(`刷新签到页失败: HTTP ${after.status}，改用首次签到页解析结果`);
+  }
+  const days = parseDays(resultBody);
+  const balance = parseBalance(resultBody);
   if (days) console.log(`已连续登录: ${days} 天`);
   if (balance) console.log(`当前余额: ${balance}`);
 
