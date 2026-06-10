@@ -15,12 +15,20 @@ function parseBalance(html) {
   if (!m) return null;
   const balanceHtml = m[2];
   const imgLabels = { G: '金', S: '银', B: '铜' };
-  const imgPaired = [...balanceHtml.matchAll(/(\d+)\s*<img\b[^>]*\balt=["']([GSB])["'][^>]*>/gi)]
-    .map((m) => `${m[1]} ${imgLabels[m[2].toUpperCase()]}`);
+  const imgPaired = [];
+  let match;
+  const imgRe = /(\d+)\s*<img\b[^>]*\balt=["']([GSB])["'][^>]*>/gi;
+  while ((match = imgRe.exec(balanceHtml)) !== null) {
+    imgPaired.push(`${match[1]} ${imgLabels[match[2].toUpperCase()]}`);
+  }
   if (imgPaired.length) return imgPaired.join(' ');
 
   const text = balanceHtml.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
-  const paired = [...text.matchAll(/(\d+)\s*(金|银|铜)/g)].map((m) => `${m[1]} ${m[2]}`);
+  const paired = [];
+  const textRe = /(\d+)\s*(金|银|铜)/g;
+  while ((match = textRe.exec(text)) !== null) {
+    paired.push(`${match[1]} ${match[2]}`);
+  }
   if (paired.length) return paired.join(' ');
   const nums = text.match(/\d+/g);
   if (!nums) return null;
