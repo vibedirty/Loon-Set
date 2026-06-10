@@ -1,4 +1,5 @@
 const sessionCookie = $persistentStore.read('v2ex-cookie') || '';
+const v = '2026-06-10 13:01'
 
 const USER_AGENT =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36';
