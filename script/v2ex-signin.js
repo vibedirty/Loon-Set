@@ -1,5 +1,7 @@
+// @file-type javascript
+// update at 2026-06-19 11:46
+
 const sessionCookie = $persistentStore.read('v2ex-cookie') || '';
-const v = '2026-06-19 00:03';
 const BASE_URL = 'https://www.v2ex.com';
 const DAILY_PATH = '/mission/daily';
 

@@ -1,5 +1,7 @@
+// @file-type javascript
+// update at 2026-06-19 11:46
+
 (function () {
-  const v = '2026-06-09 16:56:00';
   const DEBUG_NOTIFY = true;
   const INJECT_BEFORE_MS = 10 * 60 * 1000;
   const GRACE_AFTER_TARGET_MS_OUTER = 60 * 1000;
@@ -7,7 +9,7 @@
 
   function loonLog(subtitle, message, notify) {
     try {
-      console.log('[券脚本][' + v + '] ' + subtitle + ' ' + (message || ''));
+      console.log('[券脚本] ' + subtitle + ' ' + (message || ''));
     } catch (e) {}
 
     try {
