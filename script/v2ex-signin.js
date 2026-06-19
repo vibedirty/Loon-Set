@@ -1,5 +1,5 @@
 const sessionCookie = $persistentStore.read('v2ex-cookie') || '';
-const v = '2026-06-19 00:01';
+const v = '2026-06-19 00:02';
 const BASE_URL = 'https://www.v2ex.com';
 const DAILY_PATH = '/mission/daily';
 
@@ -8,15 +8,13 @@ const USER_AGENT =
 
 const baseHeaders = {
   'User-Agent': USER_AGENT,
-  Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-  'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-  'Cache-Control': 'no-cache',
-  Pragma: 'no-cache',
   Cookie: sessionCookie,
 };
 
-function dailyUrl() {
-  return `${BASE_URL}${DAILY_PATH}?_=${Date.now()}`;
+function dailyUrl(cacheBust) {
+  return cacheBust
+    ? `${BASE_URL}${DAILY_PATH}?_=${Date.now()}`
+    : `${BASE_URL}${DAILY_PATH}`;
 }
 
 function parseBalance(html) {
@@ -67,6 +65,19 @@ function findDailyRedeemPath(html) {
   return match ? match[1].replace(/&amp;/g, '&') : null;
 }
 
+function pageSummary(html) {
+  if (!html) return '空响应';
+  const text = html
+    .replace(/<script\b[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style\b[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;|&#160;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return text.slice(0, 160) || '无法提取响应文字';
+}
+
 function httpGet(url, extraHeaders) {
   return new Promise((resolve, reject) => {
     $httpClient.get(
@@ -103,7 +114,7 @@ function notifyResult(title, days, balance) {
 
 async function main() {
   console.log('获取 V2EX 签到页...');
-  const daily = await httpGet(dailyUrl());
+  const daily = await httpGet(dailyUrl(false));
   if (daily.status !== 200) {
     notifyFail(`获取签到页失败: HTTP ${daily.status}`);
     return;
@@ -116,19 +127,13 @@ async function main() {
   const redeemPath = findDailyRedeemPath(daily.body);
   const alreadySigned = isSignedToday(daily.body);
   let verifiedBody = alreadySigned ? daily.body : '';
+  let redeemDiagnostic = '';
 
   if (alreadySigned) {
     console.log('今天已经签到过了');
   } else if (redeemPath) {
     console.log(`执行签到 (${redeemPath})...`);
-    const redeem = await httpGet(`${BASE_URL}${redeemPath}`, {
-      Referer: `${BASE_URL}${DAILY_PATH}`,
-      'Sec-Fetch-Dest': 'document',
-      'Sec-Fetch-Mode': 'navigate',
-      'Sec-Fetch-Site': 'same-origin',
-      'Sec-Fetch-User': '?1',
-      'Upgrade-Insecure-Requests': '1',
-    });
+    const redeem = await httpGet(`${BASE_URL}${redeemPath}`);
     if (redeem.status !== 302 && redeem.status !== 200) {
       notifyFail(`签到接口返回异常: HTTP ${redeem.status}`);
       return;
@@ -137,6 +142,8 @@ async function main() {
       console.log('领取接口返回已领取状态');
       verifiedBody = redeem.body;
     } else {
+      redeemDiagnostic = `HTTP ${redeem.status}，${pageSummary(redeem.body)}`;
+      console.log(`领取接口响应: ${redeemDiagnostic}`);
       console.log('签到请求已发送，正在刷新页面验证结果...');
     }
   } else {
@@ -147,9 +154,7 @@ async function main() {
   let after = daily;
   if (!verifiedBody) {
     await wait(800);
-    after = await httpGet(dailyUrl(), {
-      Referer: `${BASE_URL}${DAILY_PATH}`,
-    });
+    after = await httpGet(dailyUrl(true));
     if (after.status !== 200 || !after.body) {
       notifyFail(`无法验证签到结果: HTTP ${after.status}`);
       return;
@@ -164,7 +169,8 @@ async function main() {
     const reason = findDailyRedeemPath(verifiedBody)
       ? '领取按钮仍然存在'
       : '页面没有已领取标记';
-    notifyFail(`签到未生效: ${reason}`);
+    const detail = redeemDiagnostic ? `；领取响应：${redeemDiagnostic}` : '';
+    notifyFail(`签到未生效: ${reason}${detail}`);
     return;
   }
 
