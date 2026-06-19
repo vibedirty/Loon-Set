@@ -1,15 +1,45 @@
 const sessionCookie = $persistentStore.read('v2ex-cookie') || '';
-const v = '2026-06-19 00:02';
+const v = '2026-06-19 00:03';
 const BASE_URL = 'https://www.v2ex.com';
 const DAILY_PATH = '/mission/daily';
 
 const USER_AGENT =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36';
 
-const baseHeaders = {
-  'User-Agent': USER_AGENT,
-  Cookie: sessionCookie,
-};
+const cookieJar = {};
+
+sessionCookie.split(/;\s*/).forEach((item) => {
+  const separator = item.indexOf('=');
+  if (separator > 0) {
+    cookieJar[item.slice(0, separator).trim()] = item.slice(separator + 1).trim();
+  }
+});
+
+function cookieHeader() {
+  return Object.keys(cookieJar)
+    .map((name) => `${name}=${cookieJar[name]}`)
+    .join('; ');
+}
+
+function updateCookies(headers) {
+  if (!headers) return;
+  const key = Object.keys(headers).find((name) => name.toLowerCase() === 'set-cookie');
+  if (!key) return;
+  const values = Array.isArray(headers[key]) ? headers[key] : [headers[key]];
+  values.forEach((value) => {
+    String(value)
+      .split(/,\s*(?=[^;,=\s]+=[^;,]*)/)
+      .forEach((cookie) => {
+        const pair = cookie.split(';', 1)[0];
+        const separator = pair.indexOf('=');
+        if (separator <= 0) return;
+        const name = pair.slice(0, separator).trim();
+        const content = pair.slice(separator + 1).trim();
+        if (content) cookieJar[name] = content;
+        else delete cookieJar[name];
+      });
+  });
+}
 
 function dailyUrl(cacheBust) {
   return cacheBust
@@ -83,10 +113,15 @@ function httpGet(url, extraHeaders) {
     $httpClient.get(
       {
         url,
-        headers: { ...baseHeaders, ...(extraHeaders || {}) },
+        headers: {
+          'User-Agent': USER_AGENT,
+          Cookie: cookieHeader(),
+          ...(extraHeaders || {}),
+        },
       },
       (error, response, data) => {
         if (error) return reject(error);
+        updateCookies(response && response.headers);
         resolve({
           status: response && (response.status || response.statusCode),
           body: data || '',
@@ -113,8 +148,17 @@ function notifyResult(title, days, balance) {
 }
 
 async function main() {
+  console.log('初始化 V2EX 会话...');
+  const home = await httpGet(`${BASE_URL}/`);
+  if (home.status !== 200) {
+    notifyFail(`初始化会话失败: HTTP ${home.status}`);
+    return;
+  }
+
   console.log('获取 V2EX 签到页...');
-  const daily = await httpGet(dailyUrl(false));
+  const daily = await httpGet(dailyUrl(false), {
+    Referer: `${BASE_URL}/`,
+  });
   if (daily.status !== 200) {
     notifyFail(`获取签到页失败: HTTP ${daily.status}`);
     return;
@@ -133,7 +177,9 @@ async function main() {
     console.log('今天已经签到过了');
   } else if (redeemPath) {
     console.log(`执行签到 (${redeemPath})...`);
-    const redeem = await httpGet(`${BASE_URL}${redeemPath}`);
+    const redeem = await httpGet(`${BASE_URL}${redeemPath}`, {
+      Referer: `${BASE_URL}${DAILY_PATH}`,
+    });
     if (redeem.status !== 302 && redeem.status !== 200) {
       notifyFail(`签到接口返回异常: HTTP ${redeem.status}`);
       return;
@@ -154,7 +200,9 @@ async function main() {
   let after = daily;
   if (!verifiedBody) {
     await wait(800);
-    after = await httpGet(dailyUrl(true));
+    after = await httpGet(dailyUrl(true), {
+      Referer: `${BASE_URL}${DAILY_PATH}`,
+    });
     if (after.status !== 200 || !after.body) {
       notifyFail(`无法验证签到结果: HTTP ${after.status}`);
       return;
