@@ -1,5 +1,7 @@
 const sessionCookie = $persistentStore.read('v2ex-cookie') || '';
-const v = '2026-06-10 13:01'
+const v = '2026-06-19 00:00';
+const BASE_URL = 'https://www.v2ex.com';
+const DAILY_PATH = '/mission/daily';
 
 const USER_AGENT =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36';
@@ -43,6 +45,10 @@ function parseDays(html) {
   return m ? m[1] : null;
 }
 
+function isSignedToday(html) {
+  return /每日登录奖励(?:已经)?已领取|今天(?:已经)?签到过了|今日(?:登录)?奖励(?:已经)?已领取/.test(html);
+}
+
 function isSignInPage(html) {
   return /You need to sign in first to view this page/.test(html)
     || /\bUsername\b/.test(html)
@@ -51,12 +57,8 @@ function isSignInPage(html) {
 }
 
 function findDailyRedeemPath(html) {
-  const target = '/mission/daily/redeem';
-  const startIndex = html.indexOf(target);
-  if (startIndex === -1) return null;
-  const tail = html.slice(startIndex);
-  const endIndex = tail.search(/["'<> \t\r\n]/);
-  return endIndex === -1 ? tail : tail.slice(0, endIndex);
+  const match = html.match(/(?:https?:\/\/www\.v2ex\.com)?(\/mission\/daily\/redeem\?[^"'<> \t\r\n]+)/i);
+  return match ? match[1].replace(/&amp;/g, '&') : null;
 }
 
 function httpGet(url, extraHeaders) {
@@ -88,7 +90,7 @@ function notifyResult(title, days, balance) {
 
 async function main() {
   console.log('获取 V2EX 签到页...');
-  const daily = await httpGet('https://v2ex.com/mission/daily');
+  const daily = await httpGet(`${BASE_URL}${DAILY_PATH}`);
   if (daily.status !== 200) {
     notifyFail(`获取签到页失败: HTTP ${daily.status}`);
     return;
@@ -99,34 +101,48 @@ async function main() {
   }
 
   const redeemPath = findDailyRedeemPath(daily.body);
-  let alreadySigned = false;
+  const alreadySigned = isSignedToday(daily.body);
 
-  if (!redeemPath) {
+  if (alreadySigned) {
     console.log('今天已经签到过了');
-    alreadySigned = true;
-  } else {
+  } else if (redeemPath) {
     console.log(`执行签到 (${redeemPath})...`);
-    const redeem = await httpGet(`https://v2ex.com${redeemPath}`, {
-      Referer: 'https://v2ex.com/mission/daily',
+    const redeem = await httpGet(`${BASE_URL}${redeemPath}`, {
+      Referer: `${BASE_URL}${DAILY_PATH}`,
     });
     if (redeem.status !== 302 && redeem.status !== 200) {
       notifyFail(`签到接口返回异常: HTTP ${redeem.status}`);
       return;
     }
-    if (/每日登录奖励已领取|今天已经签到过了|已连续登录/.test(redeem.body)) {
-      console.log('签到成功');
-    } else {
-      console.log('签到请求已完成');
-    }
+    console.log('签到请求已发送，正在验证结果...');
+  } else {
+    notifyFail('签到页未显示领取按钮，也没有已领取标记，未执行签到');
+    return;
   }
 
-  const after = await httpGet('https://v2ex.com/mission/daily');
-  const resultBody = after.status === 200 && after.body ? after.body : daily.body;
-  if (after.status !== 200) {
-    console.log(`刷新签到页失败: HTTP ${after.status}，改用首次签到页解析结果`);
+  const after = alreadySigned
+    ? daily
+    : await httpGet(`${BASE_URL}${DAILY_PATH}`, {
+      Referer: `${BASE_URL}${DAILY_PATH}`,
+    });
+  if (after.status !== 200 || !after.body) {
+    notifyFail(`无法验证签到结果: HTTP ${after.status}`);
+    return;
   }
-  const days = parseDays(resultBody);
-  const balance = parseBalance(resultBody);
+  if (isSignInPage(after.body)) {
+    notifyFail('验证签到结果时发现 Cookie 已失效或未登录');
+    return;
+  }
+  if (!isSignedToday(after.body)) {
+    const reason = findDailyRedeemPath(after.body)
+      ? '领取按钮仍然存在'
+      : '页面没有已领取标记';
+    notifyFail(`签到未生效: ${reason}`);
+    return;
+  }
+
+  const days = parseDays(after.body);
+  const balance = parseBalance(after.body);
   if (days) console.log(`已连续登录: ${days} 天`);
   if (balance) console.log(`当前余额: ${balance}`);
 
