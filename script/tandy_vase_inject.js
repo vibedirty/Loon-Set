@@ -1,11 +1,11 @@
 // @file-type javascript
-// update at 2026-06-19 11:46
+// update at 2026-07-23 11:36
 
 (function () {
   const DEBUG_NOTIFY = true;
   const INJECT_BEFORE_MS = 10 * 60 * 1000;
   const GRACE_AFTER_TARGET_MS_OUTER = 60 * 1000;
-  const fallback = ['10:00:00', '16:00:00', '21:00:00'];
+  const fallback = ['00:00:00', '10:00:00', '16:00:00', '21:00:00'];
 
   function loonLog(subtitle, message, notify) {
     try {
@@ -53,7 +53,7 @@
   window.__PDD_TANDY_VASE_AUTO_CONFIRM_INJECTED__ = true;
 
   /**
-   * 自动点击确认兑换的三个时间点。
+   * 自动点击确认兑换的目标时间点。
    * 页面时间使用设备本地时间。
    */
   var TARGET_TIMES = ${targetTimesJson};
@@ -110,7 +110,7 @@
       }
     }
 
-    // 当天三个时间都已过，排到明天第一个时间。
+    // 当天所有目标时间都已过，排到明天第一个时间。
     var first = targets[0];
     if (!first) return null;
     return {
