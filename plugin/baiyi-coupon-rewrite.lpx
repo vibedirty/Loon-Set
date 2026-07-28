@@ -1,10 +1,11 @@
-#!name=百亿补贴券复写
+#!name=拼多多工具箱
 #!author=Codex
 #!tag=薅羊毛
 #!icon=https://raw.githubusercontent.com/luestr/IconResource/main/App_icon/120px/PinDuoDuo.png
 
 [Script]
 http-response ^https:\/\/m\.pinduoduo\.net\/tandy_vase\.html\?.*$ script-path=https://raw.githubusercontent.com/vibedirty/Loon-Set/main/script/tandy_vase_inject.js, requires-body=true, tag=自动点击注入
+http-response ^https:\/\/api\.pinduoduo\.com\/api\/philo\/personal\/hub(?:\?.*)?$ script-path=https://raw.githubusercontent.com/vibedirty/Loon-Set/main/script/pdd_personal_switch_account.js, requires-body=true, tag=个人中心切换账号
 
 [MITM]
-hostname = m.pinduoduo.net
+hostname = m.pinduoduo.net, api.pinduoduo.com
