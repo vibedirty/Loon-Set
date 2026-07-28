@@ -1,29 +1,32 @@
 // @file-type javascript
-// update at 2026-07-28 19:37
+// update at 2026-07-28 19:46
 
 (function () {
   const SWITCH_TITLE = "切换账号";
   const SWITCH_LINK = "login_exchange_account.html";
   const SWITCH_LOG_SN = 4271537;
-  const NOTICE_VERSION = "20260728-2";
+  const NOTICE_VERSION = "20260728-3";
 
   try {
     const body = JSON.parse($response.body);
     const result = injectBesideEverySetting(body);
+    const safeUrl = String($request.url || "").split("?")[0];
 
     if (result.inserted === 0 && result.existing === 0) {
-      console.log("[拼多多切换账号] 未找到可注入的个人中心图标区域");
+      console.log(
+        `[拼多多切换账号] 已命中 ${safeUrl}，但未找到可注入的“设置”按钮`
+      );
       notifyOnce(
         "not-found",
         "个人中心脚本已执行",
-        "未在接口响应中找到“设置”按钮"
+        "已命中新接口，但响应中没有“设置”按钮"
       );
       $done({});
       return;
     }
 
     console.log(
-      `[拼多多切换账号] 已处理官方设置按钮所在列表：新增 ${result.inserted} 处，已有 ${result.existing} 处`
+      `[拼多多切换账号] 已命中 ${safeUrl}：新增 ${result.inserted} 处，已有 ${result.existing} 处`
     );
     notifyOnce(
       "success",
