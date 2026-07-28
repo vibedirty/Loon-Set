@@ -1,5 +1,5 @@
 // @file-type javascript
-// update at 2026-07-23 11:36
+// update at 2026-07-28 10:29
 
 (function () {
   const DEBUG_NOTIFY = true;
@@ -34,6 +34,10 @@
     body = body.replace(new RegExp('((?:' + rewriteHourMinutePattern + '))开抢', 'g'), '$1准备好了吗');
   }
   body = body.replace(/"couponType":2/g, '"couponType":0');
+  body = body.replace(
+    /"couponType":[1-9]\d*(?=,[^{}]*"(?:unableToast|couponCornerText)":"(?:[^"\\]|\\.)*(?:(?:每日|每周)限兑|本周(?:已兑换|兑换(?:[^"\\]|\\.)*上限)|(?:\\u6bcf\\u65e5|\\u6bcf\\u5468)\\u9650\\u5151|\\u672c\\u5468(?:\\u5df2\\u5151\\u6362|\\u5151\\u6362(?:[^"\\]|\\.)*\\u4e0a\\u9650)))/g,
+    '"couponType":0'
+  );
 
   if (!body || body.indexOf('</body>') === -1) {
     loonLog('未注入', 'response body 为空或没有 </body>');
