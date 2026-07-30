@@ -1,3 +1,6 @@
+// @file-type javascript
+// update at 2026-07-30 13:04
+
 const cookieVal = $persistentStore.read("glados-cookie") || "";
 
 const header = {
@@ -19,10 +22,11 @@ function checkin(){
 	const params = {
 		url: 'https://glados.one/api/user/checkin',
 		headers: {...header},
-		body: JSON.stringify({"token":"glados.one"})
+		body: JSON.stringify({"token":"glados.one"}),
+		timeout: 30000
 	};
 	$httpClient.post(params, function(error,response,data){
-		console.log('end request')
+		console.log(`GLaDOS request finished, HTTP ${response?.status || response?.statusCode || '未知'}`);
 		if(error){
 			$notification.post('GlaDOS签到错误','',String(error));
 		}else {
