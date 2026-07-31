@@ -3,10 +3,10 @@
 #!author=Codex
 #!tag=薅羊毛
 #!icon=https://raw.githubusercontent.com/luestr/IconResource/main/App_icon/120px/PinDuoDuo.png
-#!date=2026-07-31 11:39
+#!date=2026-07-31 11:49
 
 [Script]
 拼多多自动兑换 = type=http-response,pattern=^https:\/\/m\.pinduoduo\.net\/tandy_vase\.html(?:\?.*)?$,requires-body=1,max-size=-1,timeout=10,script-path=https://raw.githubusercontent.com/vibedirty/Loon-Set/main/shadowrocket/pdd_toolbox.js
 
 [MITM]
-hostname = m.pinduoduo.net
+hostname = %APPEND% m.pinduoduo.net
