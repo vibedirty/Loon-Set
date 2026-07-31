@@ -1,5 +1,5 @@
 // @file-type javascript
-// update at 2026-07-28 10:29
+// update at 2026-07-31 11:32
 
 (function () {
   const DEBUG_NOTIFY = true;
@@ -7,14 +7,18 @@
   const GRACE_AFTER_TARGET_MS_OUTER = 60 * 1000;
   const fallback = ['00:00:00', '10:00:00', '16:00:00', '21:00:00'];
 
-  function loonLog(subtitle, message, notify) {
+  function scriptLog(subtitle, message, notify) {
     try {
       console.log('[券脚本] ' + subtitle + ' ' + (message || ''));
     } catch (e) {}
 
     try {
-      if (DEBUG_NOTIFY && notify && typeof $notification !== 'undefined') {
+      if (!DEBUG_NOTIFY || !notify) return;
+
+      if (typeof $notification !== 'undefined') {
         $notification.post('拼多多注入脚本', subtitle, message || '');
+      } else if (typeof $notify !== 'undefined') {
+        $notify('拼多多注入脚本', subtitle, message || '');
       }
     } catch (e) {}
   }
@@ -27,7 +31,7 @@
     .join('|');
 
   let body = ($response && $response.body) || '';
-  loonLog('收到 response', 'url: ' + (($request && $request.url) || 'unknown') + ', body length: ' + body.length + ', times: ' + targetTimes.join('/'));
+  scriptLog('收到 response', 'url: ' + (($request && $request.url) || 'unknown') + ', body length: ' + body.length + ', times: ' + targetTimes.join('/'));
 
   // 原 [Rewrite] 逻辑合并到 response script，避免同一 URL 上 Rewrite 与 Script 冲突。
   if (rewriteHourMinutePattern) {
@@ -40,13 +44,13 @@
   );
 
   if (!body || body.indexOf('</body>') === -1) {
-    loonLog('未注入', 'response body 为空或没有 </body>');
+    scriptLog('未注入', 'response body 为空或没有 </body>');
     $done({ body });
     return;
   }
 
   if (body.indexOf('__PDD_TANDY_VASE_AUTO_CONFIRM_INJECTED__') !== -1) {
-    loonLog('跳过注入', 'HTML 中已存在注入标记');
+    scriptLog('跳过注入', 'HTML 中已存在注入标记');
     $done({ body });
     return;
   }
@@ -332,12 +336,12 @@
   const nextTargetInfo = getNextTargetInfo();
 
   if (nextTargetInfo.diffMs > INJECT_BEFORE_MS) {
-    loonLog('无需注入', '距离下次自动兑换还有' + nextTargetInfo.waitText + '（' + nextTargetInfo.label + '），仅执行复写');
+    scriptLog('无需注入', '距离下次自动兑换还有' + nextTargetInfo.waitText + '（' + nextTargetInfo.label + '），仅执行复写');
     $done({ body });
     return;
   }
 
   const newBody = body.replace(/<\/body>/i, injected + '</body>');
-  loonLog('注入成功', '将在' + nextTargetInfo.waitText + '后自动兑换（' + nextTargetInfo.label + '）', true);
+  scriptLog('注入成功', '将在' + nextTargetInfo.waitText + '后自动兑换（' + nextTargetInfo.label + '）', true);
   $done({ body: newBody });
 })();
