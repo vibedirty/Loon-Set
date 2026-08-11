@@ -1,5 +1,5 @@
 // @file-type javascript
-// update at 2026-07-28 10:29
+// update at 2026-08-11 16:57
 
 (function () {
   const DEBUG_NOTIFY = true;
@@ -164,6 +164,23 @@
     }
   }
 
+  function formatClickTime(date) {
+    function pad2(value) {
+      return String(value).padStart(2, '0');
+    }
+
+    return pad2(date.getHours()) + ':' +
+      pad2(date.getMinutes()) + ':' +
+      pad2(date.getSeconds()) + ':' +
+      String(date.getMilliseconds()).padStart(2, '0');
+  }
+
+  function logClickTime() {
+    try {
+      console.log('自动兑换已点击：' + formatClickTime(new Date()));
+    } catch (e) {}
+  }
+
   function clickButton(btn) {
     if (!btn || clicked || clickStarted) return false;
 
@@ -180,6 +197,7 @@
 
     try {
       btn.click();
+      logClickTime();
       return true;
     } catch (e) {
       try {
@@ -188,6 +206,7 @@
           cancelable: true,
           view: window
         }));
+        logClickTime();
         return true;
       } catch (err) {
         clicked = false;
