@@ -1,12 +1,13 @@
 // @file-type javascript
-// update at 2026-06-19 11:46
+// update at 2026-09-21 09:59
 
 const sessionCookie = $persistentStore.read('v2ex-cookie') || '';
-const BASE_URL = 'https://www.v2ex.com';
+const BASE_URL = 'https://v2ex.com';
 const DAILY_PATH = '/mission/daily';
 
 const USER_AGENT =
-  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36';
+  $persistentStore.read('v2ex-user-agent') ||
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36';
 
 const cookieJar = {};
 
@@ -93,7 +94,7 @@ function isSignInPage(html) {
 }
 
 function findDailyRedeemPath(html) {
-  const match = html.match(/(?:https?:\/\/www\.v2ex\.com)?(\/mission\/daily\/redeem\?[^"'<> \t\r\n]+)/i);
+  const match = html.match(/(?:https?:\/\/(?:www\.)?v2ex\.com)?(\/mission\/daily\/redeem\?[^"'<> \t\r\n]+)/i);
   return match ? match[1].replace(/&amp;/g, '&') : null;
 }
 
@@ -110,6 +111,25 @@ function pageSummary(html) {
   return text.slice(0, 160) || '无法提取响应文字';
 }
 
+function responseHeader(headers, name) {
+  const key = Object.keys(headers || {}).find((key) => key.toLowerCase() === name);
+  return key ? String(headers[key]) : '';
+}
+
+function responseProblem(response, acceptedStatuses) {
+  const status = response.status || '未知';
+  const challenged = responseHeader(response.headers, 'cf-mitigated').toLowerCase() === 'challenge'
+    || /\b_cf_chl_opt\b|<script\b[^>]*\bsrc=["'][^"']*\/cdn-cgi\/challenge-platform\//i.test(response.body);
+  if (challenged) {
+    return `HTTP ${status}，遇到 Cloudflare 浏览器验证；请在与 Loon 使用相同网络出口的浏览器中访问 ${BASE_URL}${DAILY_PATH}，完成验证后更新 v2ex-cookie，并将该浏览器的 User-Agent 保存为 v2ex-user-agent。脚本无法执行浏览器验证`;
+  }
+  if (response.status === 403) {
+    return `HTTP 403，服务器拒绝访问，尚不能确定具体原因；请先用相同网络出口的浏览器打开 ${BASE_URL}${DAILY_PATH}，确认能够访问并已登录，再更新完整 Cookie 和 v2ex-user-agent`;
+  }
+  if (!acceptedStatuses.includes(response.status)) return `HTTP ${status}`;
+  return '';
+}
+
 function httpGet(url, extraHeaders) {
   return new Promise((resolve, reject) => {
     $httpClient.get(
@@ -117,6 +137,8 @@ function httpGet(url, extraHeaders) {
         url,
         headers: {
           'User-Agent': USER_AGENT,
+          Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
           Cookie: cookieHeader(),
           ...(extraHeaders || {}),
         },
@@ -125,7 +147,8 @@ function httpGet(url, extraHeaders) {
         if (error) return reject(error);
         updateCookies(response && response.headers);
         resolve({
-          status: response && (response.status || response.statusCode),
+          status: Number(response && (response.status || response.statusCode)),
+          headers: (response && response.headers) || {},
           body: data || '',
         });
       },
@@ -150,19 +173,14 @@ function notifyResult(title, days, balance) {
 }
 
 async function main() {
-  console.log('初始化 V2EX 会话...');
-  const home = await httpGet(`${BASE_URL}/`);
-  if (home.status !== 200) {
-    notifyFail(`初始化会话失败: HTTP ${home.status}`);
-    return;
-  }
-
+  // 直接使用已保存的 Cookie，首页访问失败不应阻止获取签到页。
   console.log('获取 V2EX 签到页...');
   const daily = await httpGet(dailyUrl(false), {
     Referer: `${BASE_URL}/`,
   });
-  if (daily.status !== 200) {
-    notifyFail(`获取签到页失败: HTTP ${daily.status}`);
+  const dailyProblem = responseProblem(daily, [200]);
+  if (dailyProblem) {
+    notifyFail(`获取签到页失败: ${dailyProblem}`);
     return;
   }
   if (isSignInPage(daily.body)) {
@@ -178,12 +196,13 @@ async function main() {
   if (alreadySigned) {
     console.log('今天已经签到过了');
   } else if (redeemPath) {
-    console.log(`执行签到 (${redeemPath})...`);
+    console.log('执行 V2EX 签到...');
     const redeem = await httpGet(`${BASE_URL}${redeemPath}`, {
       Referer: `${BASE_URL}${DAILY_PATH}`,
     });
-    if (redeem.status !== 302 && redeem.status !== 200) {
-      notifyFail(`签到接口返回异常: HTTP ${redeem.status}`);
+    const redeemProblem = responseProblem(redeem, [200, 302]);
+    if (redeemProblem) {
+      notifyFail(`签到接口返回异常: ${redeemProblem}`);
       return;
     }
     if (isSignedToday(redeem.body)) {
@@ -205,8 +224,9 @@ async function main() {
     after = await httpGet(dailyUrl(true), {
       Referer: `${BASE_URL}${DAILY_PATH}`,
     });
-    if (after.status !== 200 || !after.body) {
-      notifyFail(`无法验证签到结果: HTTP ${after.status}`);
+    const afterProblem = responseProblem(after, [200]);
+    if (afterProblem || !after.body) {
+      notifyFail(`无法验证签到结果: ${afterProblem || '空响应'}`);
       return;
     }
     verifiedBody = after.body;
