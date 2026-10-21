@@ -1,5 +1,5 @@
 // @file-type javascript
-// update at 2026-10-21 10:47
+// update at 2026-10-21 10:59
 // Loon http-response：活动 197270 的下一场已解锁优惠券。
 (function () {
   const STATE_KEY = 'pdd_hour_coupon_197270_target';
@@ -56,6 +56,8 @@
     window.__PDD_HOUR_COUPON_AUTO__ = true;
     var clicked = false;
     var graceMs = 60 * 1000;
+    var prepareBeforeMs = 1500;
+    var pollIntervalMs = 20;
     var session = new Date(target.time);
     var label = String(session.getHours()).padStart(2, '0') + ':' +
       String(session.getMinutes()).padStart(2, '0');
@@ -68,8 +70,8 @@
     function tick() {
       if (clicked) return;
       var now = Date.now();
-      if (now < target.time) {
-        setTimeout(tick, target.time - now);
+      if (now < target.time - prepareBeforeMs) {
+        setTimeout(tick, target.time - prepareBeforeMs - now);
         return;
       }
       if (now > target.time + graceMs) {
@@ -80,6 +82,7 @@
       var button = document.querySelector(root + ' .zoe79pyA .nzc7Ln1S');
       // 立即抢说明页面已完成对应状态的渲染，避免点击到尚未绑定事件的初始 HTML。
       if (
+        now >= target.time &&
         active && (active.textContent || '').indexOf(label) !== -1 &&
         button && (button.textContent || '').trim() === '立即抢'
       ) {
@@ -93,11 +96,13 @@
           return;
         }
       }
-      setTimeout(tick, 20);
+      // 临近目标时间时缩短等待，避免固定间隔额外推迟到点检测。
+      var remainingMs = target.time - Date.now();
+      setTimeout(tick, remainingMs > 0 ? Math.min(pollIntervalMs, remainingMs) : pollIntervalMs);
     }
 
     window.addEventListener('pagehide', function () { clicked = true; });
-    log('已安排 ' + label + '，仅点击一次');
+    log('已安排 ' + label + '，提前1.5秒开始检测，仅点击一次');
     tick();
   }
 
