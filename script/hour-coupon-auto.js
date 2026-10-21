@@ -1,5 +1,5 @@
 // @file-type javascript
-// update at 2026-10-21 10:59
+// update at 2026-10-21 11:08
 // Loon http-response：活动 197270 的下一场已解锁优惠券。
 (function () {
   const STATE_KEY = 'pdd_hour_coupon_197270_target';
@@ -54,10 +54,14 @@
   function runInPage(target) {
     if (window.__PDD_HOUR_COUPON_AUTO__) return;
     window.__PDD_HOUR_COUPON_AUTO__ = true;
-    var clicked = false;
+    var stopped = false;
     var graceMs = 60 * 1000;
     var prepareBeforeMs = 1500;
     var pollIntervalMs = 20;
+    var fastPollIntervalMs = 4;
+    var prepareTimer = null;
+    var pollTimer = null;
+    var targetTimer = null;
     var session = new Date(target.time);
     var label = String(session.getHours()).padStart(2, '0') + ':' +
       String(session.getMinutes()).padStart(2, '0');
@@ -67,22 +71,27 @@
       console.log('[整点抢券] ' + message);
     }
 
-    function tick() {
-      if (clicked) return;
+    function stop() {
+      stopped = true;
+      clearTimeout(prepareTimer);
+      clearTimeout(pollTimer);
+      clearTimeout(targetTimer);
+      window.removeEventListener('pagehide', stop);
+    }
+
+    function tryClick() {
+      if (stopped) return true;
       var now = Date.now();
-      if (now < target.time - prepareBeforeMs) {
-        setTimeout(tick, target.time - prepareBeforeMs - now);
-        return;
-      }
+      if (now < target.time) return false;
       if (now > target.time + graceMs) {
+        stop();
         log(label + ' 未找到就绪按钮，本次结束');
-        return;
+        return true;
       }
       var active = document.querySelector(root + ' .zBQNqdA3.J6anxRwT');
       var button = document.querySelector(root + ' .zoe79pyA .nzc7Ln1S');
-      // 立即抢说明页面已完成对应状态的渲染，避免点击到尚未绑定事件的初始 HTML。
+      // 检查目标场次和按钮当前状态，不依赖按钮文字随时间变化。
       if (
-        now >= target.time &&
         active && (active.textContent || '').indexOf(label) !== -1 &&
         button && (button.textContent || '').trim() === '立即抢'
       ) {
@@ -90,20 +99,56 @@
         var style = window.getComputedStyle(button);
         if (rect.width && rect.height && style.display !== 'none' &&
             style.visibility !== 'hidden' && style.opacity !== '0') {
-          clicked = true;
+          var clickedAt = Date.now();
+          if (clickedAt < target.time) return false;
+          if (clickedAt > target.time + graceMs) {
+            stop();
+            log(label + ' 未找到就绪按钮，本次结束');
+            return true;
+          }
+          stop();
           button.click();
-          log(label + ' 已点击一次，时间：' + new Date().toISOString());
-          return;
+          log(label + ' 已点击一次，时间：' + new Date(clickedAt).toISOString() +
+            '，晚于目标：' + (clickedAt - target.time) + '毫秒');
+          return true;
         }
       }
-      // 临近目标时间时缩短等待，避免固定间隔额外推迟到点检测。
-      var remainingMs = target.time - Date.now();
-      setTimeout(tick, remainingMs > 0 ? Math.min(pollIntervalMs, remainingMs) : pollIntervalMs);
+      return false;
     }
 
-    window.addEventListener('pagehide', function () { clicked = true; });
+    function poll() {
+      if (tryClick()) return;
+      var remainingMs = target.time - Date.now();
+      // 到点前100毫秒至到点后1秒加密检测，其他时间保持20毫秒间隔。
+      var interval = remainingMs <= 100 && remainingMs >= -1000 ? fastPollIntervalMs : pollIntervalMs;
+      pollTimer = setTimeout(poll, remainingMs > 0 ? Math.min(interval, remainingMs) : interval);
+    }
+
+    function checkAtTarget() {
+      if (stopped) return;
+      var remainingMs = target.time - Date.now();
+      if (remainingMs > 0) {
+        targetTimer = setTimeout(checkAtTarget, remainingMs);
+        return;
+      }
+      tryClick();
+    }
+
+    function startMonitoring() {
+      if (stopped) return;
+      var remainingMs = target.time - prepareBeforeMs - Date.now();
+      if (remainingMs > 0) {
+        prepareTimer = setTimeout(startMonitoring, remainingMs);
+        return;
+      }
+      // 到点检查独立计时，与轮询共用同一套点击判断。
+      targetTimer = setTimeout(checkAtTarget, Math.max(0, target.time - Date.now()));
+      poll();
+    }
+
+    window.addEventListener('pagehide', stop);
     log('已安排 ' + label + '，提前1.5秒开始检测，仅点击一次');
-    tick();
+    startMonitoring();
   }
 
   try {
