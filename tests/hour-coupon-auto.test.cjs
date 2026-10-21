@@ -1,5 +1,5 @@
 // @file-type javascript
-// update at 2026-10-21 11:08
+// update at 2026-10-21 11:58
 
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -10,14 +10,16 @@ const test = require('node:test');
 const source = fs.readFileSync(path.join(__dirname, '../script/hour-coupon-auto.js'), 'utf8');
 const targetTime = new Date(2026, 9, 21, 11, 0, 0).getTime();
 
-function createPage(start) {
+function createPage(start, options = {}) {
   let now = start;
   let nextId = 0;
   const timers = new Map();
   const handlers = new Map();
+  const observers = [];
+  const actions = [];
   const clicks = [];
   const logs = [];
-  const state = { text: '立即抢', label: '11:00', display: 'block' };
+  const state = { text: options.locked ? '去解锁' : '立即抢', label: '11:00', display: 'block', dialog: null };
   class ClockDate extends Date {
     constructor(...args) { super(...(args.length ? args : [now])); }
     static now() { return now; }
@@ -25,8 +27,8 @@ function createPage(start) {
   const data = { store: { list: [{
     key: 'DcCouponSpikesV5', componentId: 'test', store: { batchInfoList: [{
       batch_sn: 'target', current_session_time: targetTime / 1000,
-      status: 2, feature: { hv_task: { status: 1 } }
-    }] }
+      status: 2, feature: { hv_task: { status: options.locked ? 0 : 1, min_points: 1 } }
+    }], score: 2 }
   }] } };
   let response;
   vm.runInNewContext(source, {
@@ -41,26 +43,61 @@ function createPage(start) {
   const injected = response.match(/<script>(\(function runInPage[\s\S]*?)<\/script>/)[1];
   function mutate(changes) {
     Object.assign(state, changes);
+    observers.filter(observer => observer.active).forEach(observer => observer.callback());
   }
+  class Observer {
+    constructor(callback) { this.callback = callback; this.active = false; observers.push(this); }
+    observe() { this.active = true; }
+    disconnect() { this.active = false; }
+  }
+  const rect = () => ({ width: 100, height: 40 });
   const button = {
     get textContent() { return state.text; },
-    getBoundingClientRect() { return { width: 100, height: 40 }; },
-    click() { clicks.push(now); }
+    get display() { return state.display; },
+    getBoundingClientRect: rect,
+    click() {
+      const kind = state.text === '去解锁' ? 'unlock' : 'claim';
+      actions.push({ kind, time: now });
+      if (kind === 'claim') clicks.push(now);
+    }
   };
+  function dialogs() {
+    if (!state.dialog) return [];
+    const modal = state.dialog;
+    const confirm = {
+      textContent: '', display: modal.buttonDisplay || 'block', getBoundingClientRect: rect,
+      click() { actions.push({ kind: 'confirm', time: now }); mutate({ dialog: null }); }
+    };
+    return [{
+      display: modal.display || 'block', getBoundingClientRect: rect,
+      querySelector(selector) {
+        return {
+          '.G4TOG23F': { textContent: modal.title || '确定解锁5折神券' },
+          '.con92xrh': { textContent: modal.content || '11:00场次吗' },
+          '.jV2RSBJA': { textContent: modal.tip || '解锁将消耗1张' },
+          '.LIAWcJR3': confirm
+        }[selector] || null;
+      }
+    }];
+  }
   vm.runInNewContext(injected, {
     Date: ClockDate,
     console: { log(message) { logs.push(message); } },
+    MutationObserver: options.observer === false ? undefined : Observer,
     window: {
       addEventListener(name, callback) { handlers.set(name, callback); },
       removeEventListener(name, callback) {
         if (handlers.get(name) === callback) handlers.delete(name);
       },
-      getComputedStyle() { return { display: state.display, visibility: 'visible', opacity: '1' }; }
+      getComputedStyle(element) { return { display: element.display || 'block', visibility: 'visible', opacity: '1' }; }
     },
     document: {
       documentElement: {},
       querySelector(selector) {
         return selector.includes('zBQNqdA3') ? { textContent: state.label } : button;
+      },
+      querySelectorAll(selector) {
+        return selector === '.HMO6QNyo .StG_xOJG' ? dialogs() : [];
       }
     },
     setTimeout(callback, delay) {
@@ -86,8 +123,9 @@ function createPage(start) {
   function assertStopped() {
     assert.equal(timers.size, 0);
     assert.equal(handlers.size, 0);
+    assert.ok(observers.every(observer => !observer.active));
   }
-  return { timers, handlers, clicks, logs, mutate, advance, assertStopped };
+  return { timers, handlers, observers, actions, clicks, logs, mutate, advance, assertStopped, response };
 }
 
 test('按钮文字始终不变时，提前1.5秒启动检测，到点只点击一次', () => {
@@ -149,5 +187,132 @@ test('离开页面时清理预备定时器或正在进行的检测', () => {
     page.mutate({ text: '立即抢' });
     assert.equal(page.clicks.length, 0);
     page.assertStopped();
+  }
+});
+
+test('未解锁场次到点后依次点击去解锁、图片确认按钮和立即抢，各一次', () => {
+  const page = createPage(targetTime - 600000, { locked: true });
+  const data = JSON.parse(page.response.match(/window\.__NEXT_DATA__ = ([\s\S]*?);<\/script>/)[1]);
+  const batch = data.store.list[0].store.batchInfoList[0];
+  assert.equal(batch.status, 0);
+  assert.equal(batch.feature.hv_task.status, 0, '不能伪造解锁成功');
+  page.advance(targetTime - 1);
+  assert.equal(page.actions.length, 0);
+  assert.equal(page.observers.length, 0, '主动解锁前不监听页面变化');
+  page.advance(targetTime);
+  assert.deepEqual(page.actions, [{ kind: 'unlock', time: targetTime }]);
+  page.advance(targetTime + 100);
+  assert.equal(page.actions.length, 1, '等待弹窗时不能重复点击去解锁');
+  page.mutate({ dialog: {} });
+  assert.deepEqual(page.actions.map(action => action.kind), ['unlock', 'confirm']);
+  page.advance(targetTime + 201);
+  assert.equal(page.clicks.length, 0, '确认后必须等待页面实际解锁');
+  page.mutate({ text: '立即抢' });
+  assert.deepEqual(page.actions.map(action => action.kind), ['unlock', 'confirm', 'claim']);
+  assert.deepEqual(page.clicks, [targetTime + 201]);
+  page.mutate({ dialog: {}, text: '去解锁' });
+  page.advance(targetTime + 1000);
+  assert.equal(page.actions.length, 3);
+  page.assertStopped();
+});
+
+test('其他标题、场次、卡数或不可见的弹窗不自动确认', () => {
+  const page = createPage(targetTime - 1500, { locked: true });
+  page.advance(targetTime);
+  for (const dialog of [
+    { title: '确定兑换' }, { content: '11:30场次吗' }, { content: '111:00场次吗' },
+    { tip: '解锁将消耗2张' }, { display: 'none' }, { buttonDisplay: 'none' }
+  ]) {
+    page.mutate({ dialog });
+    assert.equal(page.actions.length, 1);
+  }
+  page.mutate({ dialog: {} });
+  assert.deepEqual(page.actions.map(action => action.kind), ['unlock', 'confirm']);
+  page.handlers.get('pagehide')();
+  page.assertStopped();
+});
+
+test('没有页面变化监听时，轮询也能完成解锁确认和抢券', () => {
+  const page = createPage(targetTime - 1500, { locked: true, observer: false });
+  page.advance(targetTime);
+  page.mutate({ dialog: {} });
+  page.advance(targetTime + 4);
+  page.mutate({ text: '立即抢' });
+  page.advance(targetTime + 8);
+  assert.deepEqual(page.actions.map(action => action.kind), ['unlock', 'confirm', 'claim']);
+  page.assertStopped();
+});
+
+test('解锁失败或弹窗未出现时不重复消耗卡，到期或离开页面后停止', () => {
+  for (const confirmed of [false, true]) {
+    const page = createPage(targetTime - 1500, { locked: true });
+    page.advance(targetTime);
+    if (confirmed) page.mutate({ dialog: {} });
+    page.advance(targetTime + 60021);
+    page.mutate({ dialog: {}, text: '立即抢' });
+    assert.deepEqual(page.actions.map(action => action.kind), confirmed ? ['unlock', 'confirm'] : ['unlock']);
+    assert.equal(page.clicks.length, 0);
+    page.assertStopped();
+  }
+  const page = createPage(targetTime - 1500, { locked: true });
+  page.advance(targetTime);
+  page.handlers.get('pagehide')();
+  page.mutate({ dialog: {}, text: '立即抢' });
+  assert.equal(page.actions.length, 1);
+  page.assertStopped();
+});
+
+function rewriteResponse(url, body, saved = new Map()) {
+  const now = targetTime - 600000;
+  class ClockDate extends Date {
+    constructor(...args) { super(...(args.length ? args : [now])); }
+    static now() { return now; }
+  }
+  let result;
+  vm.runInNewContext(source, {
+    Date: ClockDate, console: { log() {} }, $request: { url }, $response: { body },
+    $persistentStore: {
+      write(value, key) { saved.set(key, value); return true; },
+      read(key) { return saved.get(key); }
+    },
+    $done(value) { result = value.body; }
+  });
+  return result;
+}
+
+test('列表刷新只修改目标场次status，保留接口返回的真实解锁状态', () => {
+  const url = 'https://m.pinduoduo.net/api/carnival/hour_coupon/v2/coupon_info_list';
+  const saved = new Map([['pdd_hour_coupon_197270_target', JSON.stringify({
+    time: targetTime, batchSn: 'target', needsUnlock: true, minPoints: 1
+  })]]);
+  for (const unlockStatus of [0, 1]) {
+    const data = { result: { batch_info_list: [{
+      batch_sn: 'target', current_session_time: targetTime / 1000,
+      status: 2, feature: { hv_task: { status: unlockStatus, min_points: 1 } }
+    }, {
+      batch_sn: 'other', current_session_time: targetTime / 1000,
+      status: 2, feature: { hv_task: { status: 1 } }
+    }, {
+      batch_sn: 'target', current_session_time: targetTime / 1000 + 1800,
+      status: 2, feature: { hv_task: { status: 1 } }
+    }] } };
+    const output = JSON.parse(rewriteResponse(url, JSON.stringify(data), saved));
+    data.result.batch_info_list[0].status = 0;
+    assert.deepEqual(output, data);
+  }
+});
+
+test('卡数不足、查询异常或状态不可处理时不注入解锁流程', () => {
+  for (const extra of [
+    { score: 0 }, { score: undefined }, { taskApiError: true }, { unlockStatus: 9 }, { batchStatus: 1 }
+  ]) {
+    const store = Object.assign({ score: 2, batchInfoList: [{
+      batch_sn: 'target', current_session_time: targetTime / 1000,
+      status: extra.batchStatus ?? 2,
+      feature: { hv_task: { status: extra.unlockStatus ?? 0, min_points: 1 } }
+    }] }, extra);
+    const data = { store: { list: [{ key: 'DcCouponSpikesV5', componentId: 'test', store }] } };
+    const body = '<body><script id="NEXT_DATA">window.__NEXT_DATA__ = ' + JSON.stringify(data) + ';</script></body>';
+    assert.equal(rewriteResponse('https://m.pinduoduo.net/attendance.html?id=197270', body), body);
   }
 });

@@ -1,8 +1,8 @@
 # @file-type loon-plugin
-# update at 2026-10-21 10:47
+# update at 2026-10-21 11:58
 
 #!name=拼多多工具箱
-#!desc=优惠券页面改写、自动确认兑换，以及活动 197270 整点抢券。整点券需先解锁下一场，再重新进入页面并保持页面打开，到点自动点击一次。
+#!desc=优惠券页面改写、自动确认兑换，以及活动 197270 整点抢券。保持活动页面打开，到点依次点击去解锁、确认和立即抢；已解锁场次直接抢券，解锁需足够的减减卡。
 #!author=Codex
 #!tag=薅羊毛
 #!icon=https://raw.githubusercontent.com/luestr/IconResource/main/App_icon/120px/PinDuoDuo.png

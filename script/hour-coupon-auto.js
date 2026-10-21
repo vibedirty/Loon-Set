@@ -1,6 +1,6 @@
 // @file-type javascript
-// update at 2026-10-21 11:08
-// Loon http-response：活动 197270 的下一场已解锁优惠券。
+// update at 2026-10-21 11:58
+// Loon http-response：活动 197270 的下一场自动解锁、确认并抢券。
 (function () {
   const STATE_KEY = 'pdd_hour_coupon_197270_target';
   const GRACE_MS = 60 * 1000;
@@ -34,8 +34,9 @@
         batch.current_session_time * 1000 === target.time &&
         batch.status === 2 &&
         batch.feature && batch.feature.hv_task &&
-        batch.feature.hv_task.status === 1
+        [0, 1].includes(batch.feature.hv_task.status)
       ) {
+        // 仅改目标场次的开抢状态，保留真实解锁状态，由页面正常完成解锁。
         batch.status = 0;
         changed++;
       }
@@ -62,6 +63,8 @@
     var prepareTimer = null;
     var pollTimer = null;
     var targetTimer = null;
+    var unlockObserver = null;
+    var phase = target.needsUnlock ? 'unlock' : 'claim';
     var session = new Date(target.time);
     var label = String(session.getHours()).padStart(2, '0') + ':' +
       String(session.getMinutes()).padStart(2, '0');
@@ -76,7 +79,45 @@
       clearTimeout(prepareTimer);
       clearTimeout(pollTimer);
       clearTimeout(targetTimer);
+      if (unlockObserver) unlockObserver.disconnect();
       window.removeEventListener('pagehide', stop);
+    }
+
+    function isVisible(element) {
+      if (!element) return false;
+      var rect = element.getBoundingClientRect();
+      var style = window.getComputedStyle(element);
+      return Boolean(rect.width && rect.height && style.display !== 'none' &&
+        style.visibility !== 'hidden' && style.opacity !== '0');
+    }
+
+    function findUnlockConfirm() {
+      // Egqx 弹窗的确认按钮使用背景图片，无文字内容，不能按按钮文本查找。
+      var dialogs = document.querySelectorAll('.HMO6QNyo .StG_xOJG');
+      for (var i = 0; i < dialogs.length; i++) {
+        var dialog = dialogs[i];
+        var title = dialog.querySelector('.G4TOG23F');
+        var content = dialog.querySelector('.con92xrh');
+        var tip = dialog.querySelector('.jV2RSBJA');
+        var button = dialog.querySelector('.LIAWcJR3');
+        if (title && (title.textContent || '').trim() === '确定解锁5折神券' &&
+            content && new RegExp('(?:^|[^0-9])' + label + '(?:[^0-9]|$)').test(content.textContent || '') &&
+            tip && (tip.textContent || '').replace(/\s+/g, '').indexOf('解锁将消耗' + target.minPoints + '张') !== -1 &&
+            isVisible(dialog) && isVisible(button)) {
+          return button;
+        }
+      }
+      return null;
+    }
+
+    function watchUnlockProgress() {
+      // 仅在主动解锁后监听弹窗创建和列表刷新，减少确认及抢券的等待。
+      if (unlockObserver || typeof MutationObserver === 'undefined' || !document.documentElement) return;
+      unlockObserver = new MutationObserver(function () { tryClick(); });
+      unlockObserver.observe(document.documentElement, {
+        childList: true, subtree: true, characterData: true,
+        attributes: true, attributeFilter: ['class', 'style', 'hidden', 'disabled']
+      });
     }
 
     function tryClick() {
@@ -85,20 +126,34 @@
       if (now < target.time) return false;
       if (now > target.time + graceMs) {
         stop();
-        log(label + ' 未找到就绪按钮，本次结束');
+        log(label + ' 流程超时，停止于：' + phase);
         return true;
+      }
+      if (phase === 'confirm') {
+        var confirmButton = findUnlockConfirm();
+        if (!confirmButton || Date.now() < target.time || Date.now() > target.time + graceMs) return false;
+        // 点击前切换阶段，避免页面同步更新或监听回调造成重复确认。
+        phase = 'claim';
+        confirmButton.click();
+        log(label + ' 已点击解锁确认，等待券列表刷新');
+        return false;
       }
       var active = document.querySelector(root + ' .zBQNqdA3.J6anxRwT');
       var button = document.querySelector(root + ' .zoe79pyA .nzc7Ln1S');
-      // 检查目标场次和按钮当前状态，不依赖按钮文字随时间变化。
       if (
         active && (active.textContent || '').indexOf(label) !== -1 &&
-        button && (button.textContent || '').trim() === '立即抢'
+        isVisible(button)
       ) {
-        var rect = button.getBoundingClientRect();
-        var style = window.getComputedStyle(button);
-        if (rect.width && rect.height && style.display !== 'none' &&
-            style.visibility !== 'hidden' && style.opacity !== '0') {
+        var text = (button.textContent || '').trim();
+        if (phase === 'unlock' && text === '去解锁') {
+          if (Date.now() < target.time || Date.now() > target.time + graceMs) return false;
+          phase = 'confirm';
+          watchUnlockProgress();
+          button.click();
+          log(label + ' 已点击去解锁，等待目标场次确认弹窗');
+          return false;
+        }
+        if (text === '立即抢') {
           var clickedAt = Date.now();
           if (clickedAt < target.time) return false;
           if (clickedAt > target.time + graceMs) {
@@ -108,7 +163,7 @@
           }
           stop();
           button.click();
-          log(label + ' 已点击一次，时间：' + new Date(clickedAt).toISOString() +
+          log(label + ' 已点击立即抢一次，时间：' + new Date(clickedAt).toISOString() +
             '，晚于目标：' + (clickedAt - target.time) + '毫秒');
           return true;
         }
@@ -117,7 +172,7 @@
     }
 
     function poll() {
-      if (tryClick()) return;
+      if (tryClick() || stopped) return;
       var remainingMs = target.time - Date.now();
       // 到点前100毫秒至到点后1秒加密检测，其他时间保持20毫秒间隔。
       var interval = remainingMs <= 100 && remainingMs >= -1000 ? fastPollIntervalMs : pollIntervalMs;
@@ -147,7 +202,8 @@
     }
 
     window.addEventListener('pagehide', stop);
-    log('已安排 ' + label + '，提前1.5秒开始检测，仅点击一次');
+    log('已安排 ' + label + '，提前1.5秒开始检测，' +
+      (target.needsUnlock ? '依次点击去解锁、确认、立即抢，各执行一次' : '立即抢仅点击一次'));
     startMonitoring();
   }
 
@@ -183,12 +239,20 @@
         return item.current_session_time * 1000 === time;
       });
       if (!batch || !batch.batch_sn || ![0, 2].includes(batch.status) ||
-          !batch.feature || !batch.feature.hv_task || batch.feature.hv_task.status !== 1) {
-        log('下一场未解锁或不在可处理状态，请先解锁后重新进入页面');
+          !batch.feature || !batch.feature.hv_task || ![0, 1].includes(batch.feature.hv_task.status)) {
+        log('下一场不在可处理状态，保持原响应');
         $done({ body });
         return;
       }
-      const target = { time, batchSn: batch.batch_sn, componentId: component.componentId };
+      const needsUnlock = batch.feature.hv_task.status === 0;
+      const minPoints = Number(batch.feature.hv_task.min_points) || 0;
+      if (needsUnlock && (!(minPoints > 0) || typeof component.store.score !== 'number' ||
+          component.store.score < minPoints || component.store.taskApiError)) {
+        log('下一场解锁所需减减卡不足或卡数查询异常，保持原响应');
+        $done({ body });
+        return;
+      }
+      const target = { time, batchSn: batch.batch_sn, componentId: component.componentId, needsUnlock, minPoints };
       const changed = rewriteBatch(component.store.batchInfoList, target);
       if (!$persistentStore.write(JSON.stringify(target), STATE_KEY)) {
         log('保存目标场次失败，保持原响应');
