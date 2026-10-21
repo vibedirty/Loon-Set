@@ -1,5 +1,5 @@
 // @file-type javascript
-// update at 2026-08-11 16:57
+// update at 2026-10-21 10:44
 
 (function () {
   const DEBUG_NOTIFY = true;
@@ -31,7 +31,7 @@
 
   // 原 [Rewrite] 逻辑合并到 response script，避免同一 URL 上 Rewrite 与 Script 冲突。
   if (rewriteHourMinutePattern) {
-    body = body.replace(new RegExp('((?:' + rewriteHourMinutePattern + '))开抢', 'g'), '$1准备好了吗');
+    body = body.replace(new RegExp('((?:' + rewriteHourMinutePattern + '))开?抢', 'g'), '$1准备好了吗');
   }
   body = body.replace(/"couponType":2/g, '"couponType":0');
   body = body.replace(
