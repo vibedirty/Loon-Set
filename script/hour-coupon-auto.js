@@ -1,9 +1,7 @@
 // @file-type javascript
-// update at 2026-10-21 11:58
+// update at 2026-10-21 12:13
 // Loon http-response：活动 197270 的下一场自动解锁、确认并抢券。
 (function () {
-  const STATE_KEY = 'pdd_hour_coupon_197270_target';
-  const GRACE_MS = 60 * 1000;
   const url = ($request && $request.url) || '';
   const originalBody = ($response && $response.body) || '';
   let body = originalBody;
@@ -26,25 +24,7 @@
     return midnight.getTime();
   }
 
-  function rewriteBatch(list, target) {
-    let changed = 0;
-    for (const batch of list) {
-      if (
-        batch.batch_sn === target.batchSn &&
-        batch.current_session_time * 1000 === target.time &&
-        batch.status === 2 &&
-        batch.feature && batch.feature.hv_task &&
-        [0, 1].includes(batch.feature.hv_task.status)
-      ) {
-        // 仅改目标场次的开抢状态，保留真实解锁状态，由页面正常完成解锁。
-        batch.status = 0;
-        changed++;
-      }
-    }
-    return changed;
-  }
-
-  // NEXT_DATA 位于 script 内，保留 JSON 字符串的 HTML 安全转义。
+  // 注入参数位于 script 内，保留 JSON 字符串的 HTML 安全转义。
   function scriptJson(value) {
     return JSON.stringify(value)
       .replace(/</g, '\\u003c')
@@ -64,6 +44,7 @@
     var pollTimer = null;
     var targetTimer = null;
     var unlockObserver = null;
+    var unlockPending = false;
     var phase = target.needsUnlock ? 'unlock' : 'claim';
     var session = new Date(target.time);
     var label = String(session.getHours()).padStart(2, '0') + ':' +
@@ -120,6 +101,40 @@
       });
     }
 
+    function findCouponAction(button) {
+      // 通过 React 组件找到页面原来的券点击事件，获取完整异步处理的 Promise。
+      var element = button;
+      var fiber = null;
+      while (element && !fiber) {
+        var keys = Object.getOwnPropertyNames(element);
+        for (var i = 0; i < keys.length; i++) {
+          if (keys[i].indexOf('__reactFiber$') === 0 || keys[i].indexOf('__reactInternalInstance$') === 0) {
+            fiber = element[keys[i]];
+            break;
+          }
+        }
+        element = element.parentElement;
+      }
+      var trackingInfo;
+      while (fiber) {
+        if (fiber.memoizedProps && fiber.memoizedProps.trackingInfo) {
+          trackingInfo = fiber.memoizedProps.trackingInfo;
+        }
+        var instance = fiber.stateNode;
+        if (instance && typeof instance.onClickCouponItem === 'function' &&
+            instance.store && instance.store.batchInfoList && typeof instance.store.batchInfoList.find === 'function') {
+          var batch = instance.store.batchInfoList.find(function (item) {
+            return item.batch_sn === target.batchSn && item.current_session_time * 1000 === target.time;
+          });
+          if (batch) {
+            return function () { return instance.onClickCouponItem(batch, trackingInfo); };
+          }
+        }
+        fiber = fiber.return;
+      }
+      return null;
+    }
+
     function tryClick() {
       if (stopped) return true;
       var now = Date.now();
@@ -138,6 +153,8 @@
         log(label + ' 已点击解锁确认，等待券列表刷新');
         return false;
       }
+      // 券列表可能先更新；必须等 onClickCouponItem 的异步锁释放后才能抢券。
+      if (unlockPending) return false;
       var active = document.querySelector(root + ' .zBQNqdA3.J6anxRwT');
       var button = document.querySelector(root + ' .zoe79pyA .nzc7Ln1S');
       if (
@@ -147,10 +164,38 @@
         var text = (button.textContent || '').trim();
         if (phase === 'unlock' && text === '去解锁') {
           if (Date.now() < target.time || Date.now() > target.time + graceMs) return false;
+          var unlockAction = findCouponAction(button);
+          if (!unlockAction) {
+            stop();
+            log(label + ' 未找到目标场次的页面解锁事件，本次结束');
+            return true;
+          }
           phase = 'confirm';
+          unlockPending = true;
           watchUnlockProgress();
-          button.click();
-          log(label + ' 已点击去解锁，等待目标场次确认弹窗');
+          try {
+            var unlockResult = unlockAction();
+            if (!unlockResult || typeof unlockResult.then !== 'function') {
+              stop();
+              log(label + ' 页面解锁事件未返回异步结果，本次结束');
+              return true;
+            }
+            unlockResult.then(function () {
+              if (stopped) return;
+              unlockPending = false;
+              log(label + ' 页面解锁处理已完成，开始检查立即抢');
+              tryClick();
+            }, function (error) {
+              if (stopped) return;
+              stop();
+              log(label + ' 页面解锁处理失败：' + String(error && error.message || error));
+            });
+          } catch (error) {
+            stop();
+            log(label + ' 触发页面解锁事件失败：' + String(error && error.message || error));
+            return true;
+          }
+          log(label + ' 已触发去解锁，等待目标场次确认弹窗');
           return false;
         }
         if (text === '立即抢') {
@@ -210,14 +255,12 @@
   try {
     const isPage = /^https:\/\/(?:m\.pinduoduo\.net|mobile\.yangkeduo\.com)\/attendance\.html\?/.test(url) &&
       /[?&]id=197270(?:&|$)/.test(url);
-    const isList = /^https:\/\/(?:[a-z0-9-]+\.)?(?:pinduoduo\.(?:com|net)|yangkeduo\.com)\/api\/carnival\/hour_coupon\/v2\/coupon_info_list(?:[?]|$)/.test(url);
 
     if (isPage) {
       if (body.indexOf('__PDD_HOUR_COUPON_AUTO__') !== -1) {
         $done({ body });
         return;
       }
-      $persistentStore.write('', STATE_KEY);
       const nextDataPattern = /(<script\b[^>]*\bid="NEXT_DATA"[^>]*>\s*window\.__NEXT_DATA__\s*=\s*)([\s\S]*?)(;\s*<\/script>)/;
       const match = nextDataPattern.exec(body);
       if (!match || !/<\/body>/i.test(body)) {
@@ -253,42 +296,11 @@
         return;
       }
       const target = { time, batchSn: batch.batch_sn, componentId: component.componentId, needsUnlock, minPoints };
-      const changed = rewriteBatch(component.store.batchInfoList, target);
-      if (!$persistentStore.write(JSON.stringify(target), STATE_KEY)) {
-        log('保存目标场次失败，保持原响应');
-        $done({ body });
-        return;
-      }
-      body = body.replace(nextDataPattern, function (_, prefix, json, suffix) {
-        return prefix + scriptJson(data) + suffix;
-      });
       const injected = '<script>(' + runInPage.toString() + ')(' + scriptJson(target) + ');</script>';
       body = body.replace(/<\/body>/i, function (closingTag) {
         return injected + closingTag;
       });
-      log('已注入，目标：' + new Date(time).toString() + '，修改券数：' + changed);
-    } else if (isList) {
-      const saved = $persistentStore.read(STATE_KEY);
-      if (!saved) {
-        $done({ body });
-        return;
-      }
-      const target = JSON.parse(saved);
-      if (Date.now() > target.time + GRACE_MS) {
-        $done({ body });
-        return;
-      }
-      let changed = 0;
-      const data = JSON.parse(body, function (key, value) {
-        if (key === 'batch_info_list' && Array.isArray(value)) {
-          changed += rewriteBatch(value, target);
-        }
-        return value;
-      });
-      if (changed) {
-        body = JSON.stringify(data);
-        log('券列表刷新：修改目标场次 ' + changed + ' 张券');
-      }
+      log('已注入，目标：' + new Date(time).toString() + '，保留页面原始券状态');
     }
     $done({ body });
   } catch (error) {

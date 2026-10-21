@@ -1,16 +1,16 @@
 # @file-type loon-plugin
-# update at 2026-10-21 11:58
+# update at 2026-10-21 12:17
 
 #!name=拼多多工具箱
-#!desc=优惠券页面改写、自动确认兑换，以及活动 197270 整点抢券。保持活动页面打开，到点依次点击去解锁、确认和立即抢；已解锁场次直接抢券，解锁需足够的减减卡。
+#!desc=优惠券自动确认与整点自动解锁抢券，需启用 MITM 并保持页面打开。
 #!author=Codex
 #!tag=薅羊毛
 #!icon=https://raw.githubusercontent.com/luestr/IconResource/main/App_icon/120px/PinDuoDuo.png
 
 [Script]
 http-response ^https:\/\/m\.pinduoduo\.net\/tandy_vase\.html\?.*$ script-path=https://raw.githubusercontent.com/vibedirty/Loon-Set/main/script/tandy_vase_inject.js, requires-body=true, tag=自动点击注入
+
 http-response ^https:\/\/(?:m\.pinduoduo\.net|mobile\.yangkeduo\.com)\/attendance\.html\?(?:[^&]*&)*id=197270(?:&.*)?$ script-path=https://raw.githubusercontent.com/vibedirty/Loon-Set/main/script/hour-coupon-auto.js, requires-body=true, tag=整点抢券页面注入
-http-response ^https:\/\/(?:[a-z0-9-]+\.)?(?:pinduoduo\.(?:com|net)|yangkeduo\.com)\/api\/carnival\/hour_coupon\/v2\/coupon_info_list(?:[?]|$) script-path=https://raw.githubusercontent.com/vibedirty/Loon-Set/main/script/hour-coupon-auto.js, requires-body=true, tag=整点抢券列表同步
 
 [MITM]
-hostname = pinduoduo.com, *.pinduoduo.com, pinduoduo.net, *.pinduoduo.net, yangkeduo.com, *.yangkeduo.com
+hostname = m.pinduoduo.net, mobile.yangkeduo.com

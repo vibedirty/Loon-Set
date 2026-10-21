@@ -1,5 +1,5 @@
 // @file-type javascript
-// update at 2026-10-21 11:58
+// update at 2026-10-21 12:13
 
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -18,6 +18,7 @@ function createPage(start, options = {}) {
   const observers = [];
   const actions = [];
   const clicks = [];
+  const ignoredClicks = [];
   const logs = [];
   const state = { text: options.locked ? '去解锁' : '立即抢', label: '11:00', display: 'block', dialog: null };
   class ClockDate extends Date {
@@ -27,7 +28,7 @@ function createPage(start, options = {}) {
   const data = { store: { list: [{
     key: 'DcCouponSpikesV5', componentId: 'test', store: { batchInfoList: [{
       batch_sn: 'target', current_session_time: targetTime / 1000,
-      status: 2, feature: { hv_task: { status: options.locked ? 0 : 1, min_points: 1 } }
+      status: options.locked ? 2 : 0, feature: { hv_task: { status: options.locked ? 0 : 1, min_points: 1 } }
     }], score: 2 }
   }] } };
   let response;
@@ -37,7 +38,6 @@ function createPage(start, options = {}) {
     $request: { url: 'https://m.pinduoduo.net/attendance.html?id=197270' },
     $response: { body: '<body><script id="NEXT_DATA">window.__NEXT_DATA__ = ' +
       JSON.stringify(data) + ';</script></body>' },
-    $persistentStore: { write() { return true; } },
     $done(value) { response = value.body; }
   });
   const injected = response.match(/<script>(\(function runInPage[\s\S]*?)<\/script>/)[1];
@@ -45,6 +45,22 @@ function createPage(start, options = {}) {
     Object.assign(state, changes);
     observers.filter(observer => observer.active).forEach(observer => observer.callback());
   }
+  let unlockBusy = false;
+  let resolveUnlock;
+  let rejectUnlock;
+  const unlockPromise = new Promise((resolve, reject) => { resolveUnlock = resolve; rejectUnlock = reject; });
+  const instance = {
+    store: options.observableList ? {
+      batchInfoList: { find(predicate) { return data.store.list[0].store.batchInfoList.find(predicate); } }
+    } : data.store.list[0].store,
+    onClickCouponItem(batch) {
+      assert.equal(batch.batch_sn, 'target');
+      if (unlockBusy) return Promise.resolve();
+      unlockBusy = true;
+      actions.push({ kind: 'unlock', time: now });
+      return unlockPromise;
+    }
+  };
   class Observer {
     constructor(callback) { this.callback = callback; this.active = false; observers.push(this); }
     observe() { this.active = true; }
@@ -57,10 +73,18 @@ function createPage(start, options = {}) {
     getBoundingClientRect: rect,
     click() {
       const kind = state.text === '去解锁' ? 'unlock' : 'claim';
+      if (kind === 'unlock') { instance.onClickCouponItem(data.store.list[0].store.batchInfoList[0]); return; }
+      if (unlockBusy) { ignoredClicks.push(now); return; }
       actions.push({ kind, time: now });
       if (kind === 'claim') clicks.push(now);
     }
   };
+  if (!options.noFiber) {
+    button[options.legacyFiber ? '__reactInternalInstance$test' : '__reactFiber$test'] = {
+      memoizedProps: { trackingInfo: { page_el_sn: 'test' } },
+      return: { stateNode: instance, return: null }
+    };
+  }
   function dialogs() {
     if (!state.dialog) return [];
     const modal = state.dialog;
@@ -125,7 +149,16 @@ function createPage(start, options = {}) {
     assert.equal(handlers.size, 0);
     assert.ok(observers.every(observer => !observer.active));
   }
-  return { timers, handlers, observers, actions, clicks, logs, mutate, advance, assertStopped, response };
+  function finishUnlock() { unlockBusy = false; resolveUnlock(); return unlockPromise; }
+  async function failUnlock() { unlockBusy = false; rejectUnlock(new Error('test failure')); await Promise.resolve(); }
+  function updateCoupon(status, unlockStatus) {
+    const batch = data.store.list[0].store.batchInfoList[0];
+    batch.status = status;
+    batch.feature.hv_task.status = unlockStatus;
+    mutate({ text: unlockStatus === 0 ? '去解锁' : status === 0 ? '立即抢' : '待开始' });
+  }
+  return { timers, handlers, observers, actions, clicks, ignoredClicks, logs, mutate, advance,
+    assertStopped, response, finishUnlock, failUnlock, updateCoupon };
 }
 
 test('按钮文字始终不变时，提前1.5秒启动检测，到点只点击一次', () => {
@@ -190,11 +223,11 @@ test('离开页面时清理预备定时器或正在进行的检测', () => {
   }
 });
 
-test('未解锁场次到点后依次点击去解锁、图片确认按钮和立即抢，各一次', () => {
+test('未解锁场次到点后依次触发去解锁、图片确认按钮和立即抢，各一次', async () => {
   const page = createPage(targetTime - 600000, { locked: true });
   const data = JSON.parse(page.response.match(/window\.__NEXT_DATA__ = ([\s\S]*?);<\/script>/)[1]);
   const batch = data.store.list[0].store.batchInfoList[0];
-  assert.equal(batch.status, 0);
+  assert.equal(batch.status, 2, '页面初始券状态必须保持原样');
   assert.equal(batch.feature.hv_task.status, 0, '不能伪造解锁成功');
   page.advance(targetTime - 1);
   assert.equal(page.actions.length, 0);
@@ -208,6 +241,8 @@ test('未解锁场次到点后依次点击去解锁、图片确认按钮和立�
   page.advance(targetTime + 201);
   assert.equal(page.clicks.length, 0, '确认后必须等待页面实际解锁');
   page.mutate({ text: '立即抢' });
+  assert.equal(page.clicks.length, 0, '按钮已更新也必须等页面异步锁释放');
+  await page.finishUnlock();
   assert.deepEqual(page.actions.map(action => action.kind), ['unlock', 'confirm', 'claim']);
   assert.deepEqual(page.clicks, [targetTime + 201]);
   page.mutate({ dialog: {}, text: '去解锁' });
@@ -232,15 +267,71 @@ test('其他标题、场次、卡数或不可见的弹窗不自动确认', () =>
   page.assertStopped();
 });
 
-test('没有页面变化监听时，轮询也能完成解锁确认和抢券', () => {
+test('没有页面变化监听时，轮询也能完成解锁确认和抢券', async () => {
   const page = createPage(targetTime - 1500, { locked: true, observer: false });
   page.advance(targetTime);
   page.mutate({ dialog: {} });
   page.advance(targetTime + 4);
   page.mutate({ text: '立即抢' });
+  await page.finishUnlock();
   page.advance(targetTime + 8);
   assert.deepEqual(page.actions.map(action => action.kind), ['unlock', 'confirm', 'claim']);
   page.assertStopped();
+});
+
+test('按钮先显示立即抢、解锁事件仍被异步锁占用时，等待结束后只抢一次', async () => {
+  const page = createPage(targetTime - 1500, { locked: true });
+  page.advance(targetTime);
+  page.mutate({ dialog: {} });
+  page.advance(targetTime + 1);
+  page.mutate({ text: '立即抢' });
+  page.advance(targetTime + 250);
+  assert.deepEqual(page.ignoredClicks, [], '不能把唯一一次抢券点击用在异步锁释放前');
+  assert.deepEqual(page.actions.map(action => action.kind), ['unlock', 'confirm']);
+  await page.finishUnlock();
+  assert.deepEqual(page.clicks, [targetTime + 250]);
+  assert.deepEqual(page.ignoredClicks, []);
+  page.assertStopped();
+});
+
+test('页面解锁事件结束后按钮才更新，也能继续抢券', async () => {
+  const page = createPage(targetTime - 1500, { locked: true, legacyFiber: true, observableList: true });
+  page.advance(targetTime);
+  page.mutate({ dialog: {} });
+  await page.finishUnlock();
+  assert.equal(page.clicks.length, 0);
+  page.advance(targetTime + 100);
+  page.mutate({ text: '立即抢' });
+  assert.deepEqual(page.clicks, [targetTime + 100]);
+  page.assertStopped();
+});
+
+test('无法定位原页面解锁事件或事件失败时停止，不能误报已经抢券', async () => {
+  const missing = createPage(targetTime - 1500, { locked: true, noFiber: true });
+  missing.advance(targetTime);
+  assert.equal(missing.actions.length, 0);
+  missing.assertStopped();
+  const failed = createPage(targetTime - 1500, { locked: true });
+  failed.advance(targetTime);
+  failed.mutate({ dialog: {} });
+  await failed.failUnlock();
+  failed.mutate({ text: '立即抢' });
+  assert.equal(failed.clicks.length, 0);
+  failed.assertStopped();
+});
+
+test('超时或离开页面后，迟到的解锁完成回调不能再点击', async () => {
+  for (const leavePage of [false, true]) {
+    const page = createPage(targetTime - 1500, { locked: true });
+    page.advance(targetTime);
+    page.mutate({ dialog: {} });
+    if (leavePage) page.handlers.get('pagehide')();
+    else page.advance(targetTime + 60021);
+    page.mutate({ text: '立即抢' });
+    await page.finishUnlock();
+    assert.equal(page.clicks.length, 0);
+    page.assertStopped();
+  }
 });
 
 test('解锁失败或弹窗未出现时不重复消耗卡，到期或离开页面后停止', () => {
@@ -262,7 +353,7 @@ test('解锁失败或弹窗未出现时不重复消耗卡，到期或离开页�
   page.assertStopped();
 });
 
-function rewriteResponse(url, body, saved = new Map()) {
+function processResponse(url, body) {
   const now = targetTime - 600000;
   class ClockDate extends Date {
     constructor(...args) { super(...(args.length ? args : [now])); }
@@ -271,24 +362,17 @@ function rewriteResponse(url, body, saved = new Map()) {
   let result;
   vm.runInNewContext(source, {
     Date: ClockDate, console: { log() {} }, $request: { url }, $response: { body },
-    $persistentStore: {
-      write(value, key) { saved.set(key, value); return true; },
-      read(key) { return saved.get(key); }
-    },
     $done(value) { result = value.body; }
   });
   return result;
 }
 
-test('列表刷新只修改目标场次status，保留接口返回的真实解锁状态', () => {
+test('券列表接口响应原样返回，不改写任何券状态', () => {
   const url = 'https://m.pinduoduo.net/api/carnival/hour_coupon/v2/coupon_info_list';
-  const saved = new Map([['pdd_hour_coupon_197270_target', JSON.stringify({
-    time: targetTime, batchSn: 'target', needsUnlock: true, minPoints: 1
-  })]]);
-  for (const unlockStatus of [0, 1]) {
+  for (const [unlockStatus, status] of [[0, 0], [0, 2], [1, 0], [1, 2]]) {
     const data = { result: { batch_info_list: [{
       batch_sn: 'target', current_session_time: targetTime / 1000,
-      status: 2, feature: { hv_task: { status: unlockStatus, min_points: 1 } }
+      status, feature: { hv_task: { status: unlockStatus, min_points: 1 } }
     }, {
       batch_sn: 'other', current_session_time: targetTime / 1000,
       status: 2, feature: { hv_task: { status: 1 } }
@@ -296,9 +380,8 @@ test('列表刷新只修改目标场次status，保留接口返回的真实解�
       batch_sn: 'target', current_session_time: targetTime / 1000 + 1800,
       status: 2, feature: { hv_task: { status: 1 } }
     }] } };
-    const output = JSON.parse(rewriteResponse(url, JSON.stringify(data), saved));
-    data.result.batch_info_list[0].status = 0;
-    assert.deepEqual(output, data);
+    const body = JSON.stringify(data, null, 2);
+    assert.equal(processResponse(url, body), body);
   }
 });
 
@@ -313,6 +396,31 @@ test('卡数不足、查询异常或状态不可处理时不注入解锁流程',
     }] }, extra);
     const data = { store: { list: [{ key: 'DcCouponSpikesV5', componentId: 'test', store }] } };
     const body = '<body><script id="NEXT_DATA">window.__NEXT_DATA__ = ' + JSON.stringify(data) + ';</script></body>';
-    assert.equal(rewriteResponse('https://m.pinduoduo.net/attendance.html?id=197270', body), body);
+    assert.equal(processResponse('https://m.pinduoduo.net/attendance.html?id=197270', body), body);
   }
+});
+
+test('解锁后仍待开始时不点击，接口状态变为可抢后再点击', async () => {
+  const page = createPage(targetTime - 1500, { locked: true });
+  page.advance(targetTime);
+  page.mutate({ dialog: {} });
+  page.updateCoupon(2, 1);
+  await page.finishUnlock();
+  page.advance(targetTime + 100);
+  assert.equal(page.clicks.length, 0);
+  page.updateCoupon(0, 1);
+  assert.deepEqual(page.clicks, [targetTime + 100]);
+  page.assertStopped();
+});
+
+test('页面初始数据逐字保留，仅添加自动操作脚本', () => {
+  const data = { store: { list: [{ key: 'DcCouponSpikesV5', componentId: 'test', store: {
+    batchInfoList: [{ batch_sn: 'target', current_session_time: targetTime / 1000,
+      status: 2, feature: { hv_task: { status: 1 } } }], extra: '<span>优惠券</span>'
+  } }] } };
+  const initialScript = '<script id="NEXT_DATA">window.__NEXT_DATA__ = ' + JSON.stringify(data, null, 2) + ';</script>';
+  const body = '<body>' + initialScript + '</body>';
+  const output = processResponse('https://m.pinduoduo.net/attendance.html?id=197270', body);
+  assert.ok(output.includes(initialScript));
+  assert.ok(output.includes('function runInPage'));
 });
