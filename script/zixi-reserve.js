@@ -1,5 +1,5 @@
 // @file-type javascript
-// update at 2026-10-30 12:28
+// update at 2026-10-30 12:32
 // 配合 plugin/zixi-reserve.lpx 使用：自动保存登录令牌，每天预约次日 09:00–18:00。
 
 (function () {
@@ -52,7 +52,7 @@
     save(token, TOKEN_KEY);
     const agent = header(request.headers, 'user-agent');
     if (agent) save(agent, AGENT_KEY);
-    if (changed) notify('登录信息已更新', '每天 06:00 自动预约次日 09:00–18:00。');
+    if (changed) notify('登录信息已更新', '每天 06:00:01 自动预约次日 09:00–18:00。');
   }
 
   function chinaTime() {

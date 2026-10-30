@@ -39,7 +39,7 @@ https://raw.githubusercontent.com/vibedirty/Loon-Set/main/script/signin.js
 https://raw.githubusercontent.com/vibedirty/Loon-Set/main/plugin/zixi-reserve.lpx
 ```
 
-启用插件、MITM 及已安装并信任的 Loon 证书，然后打开麦肯自习微信小程序的预约页面。出现登录信息已更新通知后，即可由插件每天 06:00 执行。定时任务按设备时区运行，请将设备时区设为 `Asia/Shanghai`。插件已包含定时配置，无需再向 `script/signin.js` 添加任务。
+启用插件、MITM 及已安装并信任的 Loon 证书，然后打开麦肯自习微信小程序的预约页面。出现登录信息已更新通知后，即可由插件每天 06:00:01 执行。定时任务按设备时区运行，请将设备时区设为 `Asia/Shanghai`。插件已包含定时配置，无需再向 `script/signin.js` 添加任务。
 
 令牌获取仅匹配 `/api/user` 用户信息接口，读取 Authorization 和 User-Agent 后通过 `$done({})` 原样放行请求，保存失败时同样放行。旧版误用 `$done()` 会直接断开被匹配的请求；遇到小程序请求失败时，先关闭 `麦肯自习登录信息` 规则，再更新插件和脚本缓存。已有令牌保存在 Loon 中，定时预约和自检仍可使用。
 
