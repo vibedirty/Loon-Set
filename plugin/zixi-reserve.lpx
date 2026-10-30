@@ -1,5 +1,5 @@
 # @file-type loon-plugin
-# update at 2026-10-30 12:20
+# update at 2026-10-30 12:29
 
 #!name=自习自动预约
 #!desc=设备时区须为 Asia/Shanghai。
@@ -7,7 +7,7 @@
 
 [Script]
 generic script-path=https://raw.githubusercontent.com/vibedirty/Loon-Set/main/script/zixi-reserve.js, argument="check", timeout=120, tag=麦肯自习预约自检
-http-request ^https:\/\/cloud\.macken-tech\.com\/api\/.*[?&]app_id=wx825445b915377a7f(?:&|$) script-path=https://raw.githubusercontent.com/vibedirty/Loon-Set/main/script/zixi-reserve.js, requires-body=false, timeout=10, tag=麦肯自习登录信息
+http-request ^https:\/\/cloud\.macken-tech\.com\/api\/user\?(?:[^&]*&)*app_id=wx825445b915377a7f(?:&.*)?$ script-path=https://raw.githubusercontent.com/vibedirty/Loon-Set/main/script/zixi-reserve.js, requires-body=false, timeout=10, tag=麦肯自习登录信息, enable=false
 cron "0 0 6 * * *" script-path=https://raw.githubusercontent.com/vibedirty/Loon-Set/main/script/zixi-reserve.js, timeout=180, tag=麦肯自习次日预约, enable=true
 
 [MITM]

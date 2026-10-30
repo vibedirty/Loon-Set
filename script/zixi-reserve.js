@@ -1,8 +1,9 @@
 // @file-type javascript
-// update at 2026-10-30 12:20
+// update at 2026-10-30 12:28
 // 配合 plugin/zixi-reserve.lpx 使用：自动保存登录令牌，每天预约次日 09:00–18:00。
 
 (function () {
+  const IS_REQUEST = typeof $request !== 'undefined';
   const MODE = typeof $argument === 'undefined' || $argument === '' ? 'reserve' : String($argument).trim();
   const CHECK_ONLY = MODE === 'check';
   const BASE = 'https://cloud.macken-tech.com';
@@ -40,9 +41,9 @@
 
   function capture() {
     const request = $request;
-    // 只从目标小程序带 app_id 的 GET 请求保存凭据。
+    // 只从目标小程序的用户信息 GET 请求保存凭据。
     if (String(request.method).toUpperCase() !== 'GET' ||
-        !/^https:\/\/cloud\.macken-tech\.com\/api\//.test(request.url) ||
+        !/^https:\/\/cloud\.macken-tech\.com\/api\/user\?/.test(request.url) ||
         !new RegExp('[?&]app_id=' + APP_ID + '(?:&|$)').test(request.url)) return;
     const authorization = header(request.headers, 'authorization').trim();
     if (!/^Bearer\s+\S+$/i.test(authorization)) return;
@@ -337,14 +338,16 @@
 
   (async function () {
     try {
-      if (typeof $request !== 'undefined') capture();
+      if (IS_REQUEST) capture();
       else await run();
     } catch (error) { notify(CHECK_ONLY ? '自检失败' : '执行失败', error.message || '未知错误'); }
     finally {
       if (lockKey && lockValue && $persistentStore.read(lockKey) === lockValue) {
         $persistentStore.write('0', lockKey);
       }
-      $done();
+      // Loon 的请求脚本须用空对象原样放行；无参数的 $done() 会断开连接。
+      if (IS_REQUEST) $done({});
+      else $done();
     }
   })();
 })();
