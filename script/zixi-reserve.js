@@ -1,8 +1,10 @@
 // @file-type javascript
-// update at 2026-10-30 12:11
+// update at 2026-10-30 12:20
 // 配合 plugin/zixi-reserve.lpx 使用：自动保存登录令牌，每天预约次日 09:00–18:00。
 
 (function () {
+  const MODE = typeof $argument === 'undefined' || $argument === '' ? 'reserve' : String($argument).trim();
+  const CHECK_ONLY = MODE === 'check';
   const BASE = 'https://cloud.macken-tech.com';
   const APP_ID = 'wx825445b915377a7f';
   const STORE_ID = 12;
@@ -68,6 +70,7 @@
   }
 
   function api(method, path, params) {
+    if (CHECK_ONLY && method !== 'get') return Promise.reject(fault('invalid', '自检模式禁止提交请求'));
     return new Promise((resolve, reject) => {
       let settled = false;
       function finish(error, value) {
@@ -205,6 +208,7 @@
   }
 
   async function run() {
+    if (MODE !== 'reserve' && !CHECK_ONLY) throw new Error('参数无效：预约使用 reserve，自检使用 check');
     const time = chinaTime();
     label = time.tomorrow + ' 09:00–18:00';
     if (time.hour < 6) throw new Error('北京时间 06:00 后才可预约次日，请在开放后执行');
@@ -215,25 +219,27 @@
     if (!user || !Number.isInteger(Number(user.id)) || Number(user.id) <= 0) throw new Error('无法确认当前账号');
     const uid = user.id;
     stateKey = 'zixi-booking-' + uid + '-' + STORE_ID;
-    lockKey = stateKey + '-lock';
-    const oldLock = Number($persistentStore.read(lockKey) || 0);
-    if (oldLock > Date.now()) throw new Error('另一次预约任务正在执行，请稍后再试');
-    lockValue = String(Date.now() + 190000);
-    save(lockValue, lockKey);
+    if (!CHECK_ONLY) {
+      lockKey = stateKey + '-lock';
+      const oldLock = Number($persistentStore.read(lockKey) || 0);
+      if (oldLock > Date.now()) throw new Error('另一次预约任务正在执行，请稍后再试');
+      lockValue = String(Date.now() + 190000);
+      save(lockValue, lockKey);
 
-    // 已成功或结果待确认的提交，先从服务器核实，避免重复运行时再次预约。
-    const previous = readObject(stateKey);
-    if (previous.date === target.date && previous.status) {
-      if (previous.from !== target.from || previous.until !== target.until ||
-          !Number.isInteger(Number(previous.seatId)) || Number(previous.seatId) <= 0) {
-        throw new Error('已有不同时间段或不完整的提交记录，请先人工核实');
-      }
-      const seat = { id: previous.seatId, name: previous.seatName };
-      const records = await schedule(seat, time.today);
-      const found = records.find(r => overlaps(r, target) && owned(r, uid) && covers(r, target));
-      if (found) { success(target, seat, found, true); return; }
-      if (previous.status === 'pending') {
-        throw new Error('上次提交结果仍待确认，已停止再次提交。请在小程序核实后清除 ' + stateKey + ' 再重试');
+      // 已成功或结果待确认的提交，先从服务器核实，避免重复运行时再次预约。
+      const previous = readObject(stateKey);
+      if (previous.date === target.date && previous.status) {
+        if (previous.from !== target.from || previous.until !== target.until ||
+            !Number.isInteger(Number(previous.seatId)) || Number(previous.seatId) <= 0) {
+          throw new Error('已有不同时间段或不完整的提交记录，请先人工核实');
+        }
+        const seat = { id: previous.seatId, name: previous.seatName };
+        const records = await schedule(seat, time.today);
+        const found = records.find(r => overlaps(r, target) && owned(r, uid) && covers(r, target));
+        if (found) { success(target, seat, found, true); return; }
+        if (previous.status === 'pending') {
+          throw new Error('上次提交结果仍待确认，已停止再次提交。请在小程序核实后清除 ' + stateKey + ' 再重试');
+        }
       }
     }
 
@@ -248,6 +254,7 @@
       return matches[0];
     });
     const plans = [];
+    const existingSeats = [];
     let ownPartial = false;
     // 先检查全部候选座位，发现本人已有完整预约就结束，避免改约到另一个座位。
     for (const seat of candidates) {
@@ -255,9 +262,21 @@
       const conflicts = records.filter(r => overlaps(r, target));
       const own = conflicts.filter(r => owned(r, uid));
       const existing = own.find(r => covers(r, target));
-      if (existing) { success(target, seat, existing, true); return; }
+      if (existing && !CHECK_ONLY) { success(target, seat, existing, true); return; }
+      if (existing) existingSeats.push(seat.name);
       if (own.length) ownPartial = true;
-      plans.push({ seat, reason: fixedReason(seat, target.date) || (conflicts.length ? '09:00–18:00 已有预约' : '') });
+      plans.push({ seat, reason: existing ? '本人已有完整预约' :
+        fixedReason(seat, target.date) || (conflicts.length ? '09:00–18:00 已有预约' : '') });
+    }
+    if (CHECK_ONLY) {
+      const available = plans.filter(plan => !plan.reason);
+      const decision = existingSeats.length ? '已有本人完整预约：' + existingSeats.join('、') + ' 号' :
+        ownPartial ? '已有本人部分时段预约，正式运行会停止并提示确认' :
+        available.length ? '按当前状态将优先选择 ' + available[0].seat.name + ' 号座位' : '当前没有符合条件的座位';
+      notify('自检完成', '账号登录有效，预约检查及座位查询正常。\n' +
+        plans.map(plan => plan.seat.name + ' 号：' + (plan.reason || '未固定，09:00–18:00 无冲突')).join('\n') +
+        '\n' + decision + '\n本次仅查询，未提交预约；明日的座位状态仍可能变化。');
+      return;
     }
     if (ownPartial) throw new Error('候选座位中已有本人部分时段的预约，请先人工确认，避免重复占用');
 
@@ -320,7 +339,7 @@
     try {
       if (typeof $request !== 'undefined') capture();
       else await run();
-    } catch (error) { notify('执行失败', error.message || '未知错误'); }
+    } catch (error) { notify(CHECK_ONLY ? '自检失败' : '执行失败', error.message || '未知错误'); }
     finally {
       if (lockKey && lockValue && $persistentStore.read(lockKey) === lockValue) {
         $persistentStore.write('0', lockKey);
