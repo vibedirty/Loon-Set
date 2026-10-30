@@ -1,10 +1,10 @@
 // @file-type javascript
-// update at 2026-10-30 12:32
+// update at 2026-10-30 12:38
 // 配合 plugin/zixi-reserve.lpx 使用：自动保存登录令牌，每天预约次日 09:00–18:00。
 
 (function () {
   const IS_REQUEST = typeof $request !== 'undefined';
-  const MODE = typeof $argument === 'undefined' || $argument === '' ? 'reserve' : String($argument).trim();
+  const MODE = typeof $argument === 'undefined' || $argument === null || $argument === '' ? 'reserve' : String($argument).trim();
   const CHECK_ONLY = MODE === 'check';
   const BASE = 'https://cloud.macken-tech.com';
   const APP_ID = 'wx825445b915377a7f';
@@ -214,7 +214,7 @@
     label = time.tomorrow + ' 09:00–18:00';
     if (time.hour < 6) throw new Error('北京时间 06:00 后才可预约次日，请在开放后执行');
     token = String($persistentStore.read(TOKEN_KEY) || '').trim().replace(/^Bearer\s+/i, '');
-    if (!token) throw new Error('尚未保存登录信息，请启用插件后打开麦肯自习小程序的预约页面');
+    if (!token) throw new Error('尚未保存登录信息，请在插件参数中开启获取登录信息，再打开麦肯自习小程序的预约页面');
     const target = { date: time.tomorrow, from: time.tomorrow + ' 09:00:00', until: time.tomorrow + ' 18:00:00' };
     const user = await api('get', '/api/user');
     if (!user || !Number.isInteger(Number(user.id)) || Number(user.id) <= 0) throw new Error('无法确认当前账号');

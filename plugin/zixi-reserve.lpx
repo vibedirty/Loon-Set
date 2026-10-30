@@ -1,14 +1,19 @@
 # @file-type loon-plugin
-# update at 2026-10-30 12:32
+# update at 2026-10-30 12:38
 
 #!name=自习自动预约
-#!desc=设备时区须为 Asia/Shanghai。
+#!desc=在插件参数中分别控制登录信息获取和自动预约。每天 06:00:01 预约次日 09:00–18:00，设备时区须为 Asia/Shanghai。
 #!author=Codex
+#!loon_version=3.5.1(983)
+
+[Argument]
+capture_enabled = switch,false,type=boolean,tag=获取登录信息,desc=刷新令牌时开启，保存完成后可关闭
+reserve_enabled = switch,true,type=boolean,tag=自动预约,desc=每天 06:00:01 预约次日 09:00–18:00
 
 [Script]
-generic script-path=https://raw.githubusercontent.com/vibedirty/Loon-Set/main/script/zixi-reserve.js, argument="check", timeout=120, tag=麦肯自习预约自检
-http-request ^https:\/\/cloud\.macken-tech\.com\/api\/user\?(?:[^&]*&)*app_id=wx825445b915377a7f(?:&.*)?$ script-path=https://raw.githubusercontent.com/vibedirty/Loon-Set/main/script/zixi-reserve.js, requires-body=false, timeout=10, tag=麦肯自习登录信息, enable=false
-cron "1 0 6 * * *" script-path=https://raw.githubusercontent.com/vibedirty/Loon-Set/main/script/zixi-reserve.js, timeout=180, tag=麦肯自习次日预约, enable=true
+generic then script("https://raw.githubusercontent.com/vibedirty/Loon-Set/main/script/zixi-reserve.js", "check") with timeout=120, tag="麦肯自习预约自检"
+request if ${url} ~= /^https:\/\/cloud\.macken-tech\.com\/api\/user\?(?:[^&]*&)*app_id=wx825445b915377a7f(?:&.*)?$/ && ${request.method} == "GET" then script("https://raw.githubusercontent.com/vibedirty/Loon-Set/main/script/zixi-reserve.js") with enable=${capture_enabled}, requires_body=false, timeout=10, tag="麦肯自习登录信息"
+cron "1 0 6 * * *" then script("https://raw.githubusercontent.com/vibedirty/Loon-Set/main/script/zixi-reserve.js", "reserve") with enable=${reserve_enabled}, timeout=180, tag="麦肯自习次日预约"
 
 [MITM]
 hostname = cloud.macken-tech.com
